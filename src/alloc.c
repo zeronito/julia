@@ -346,6 +346,7 @@ jl_lambda_info_t *jl_new_lambda_info(jl_value_t *ast, jl_svec_t *sparams)
     li->roots = NULL;
     li->functionObject = NULL;
     li->specFunctionObject = NULL;
+    li->specFunctionPtr = NULL;
     li->cFunctionList = NULL;
     li->functionID = 0;
     li->specFunctionID = 0;
@@ -358,6 +359,7 @@ jl_lambda_info_t *jl_new_lambda_info(jl_value_t *ast, jl_svec_t *sparams)
     li->name = anonymous_sym;
     li->def = li;
     li->capt = NULL;
+    li->hasJLWrapper = 0;
     return li;
 }
 
