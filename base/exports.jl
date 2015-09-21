@@ -1210,6 +1210,7 @@ export
 
 # multiprocessing
     addprocs,
+    capacity,
     ClusterManager,
     fetch,
     init_worker,
@@ -1218,6 +1219,7 @@ export
     launch,
     manage,
     myid,
+    navailable,
     nprocs,
     nworkers,
     pmap,
