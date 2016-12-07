@@ -1234,6 +1234,12 @@ Errors
 
    Throw an ``AssertionError`` if ``cond`` is ``false``\ . Preferred syntax for writing assertions. Message ``text`` is optionally displayed upon assertion failure.
 
+.. function:: @require precondition [message]
+
+   .. Docstring generated from Julia source
+
+   Throw ``ArgumentError`` if ``precondition`` is false.
+
 .. function:: ArgumentError(msg)
 
    .. Docstring generated from Julia source

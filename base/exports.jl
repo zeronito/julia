@@ -1407,6 +1407,7 @@ export
     @polly,
 
     @assert,
+    @require,
     @enum,
     @label,
     @goto,

@@ -119,6 +119,8 @@ include("arraymath.jl")
 include("simdloop.jl")
 importall .SimdLoop
 
+include("contracts.jl")
+
 # map-reduce operators
 include("reduce.jl")
 
