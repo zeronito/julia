@@ -781,6 +781,14 @@ function fill!{T}(A::AbstractArray{T}, x)
     A
 end
 
+function fill!(filler, A::AbstractArray, start::Integer, stop::Integer)
+    start >= 1 && stop <= length(A) || throw(BoundsError())
+    for i in start:stop
+        @inbounds A[i] = filler(i)
+    end
+    A
+end
+
 function copy!{T,N}(dest::AbstractArray{T,N}, src::AbstractArray{T,N})
     @boundscheck checkbounds(dest, indices(src)...)
     for I in eachindex(IndexStyle(src,dest), src)
