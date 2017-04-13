@@ -1,3 +1,5 @@
+# This file is a part of Julia. License is MIT: http://julialang.org/license
+
 #
 # The Computer Language Benchmarks Game
 # binary-trees benchmark
@@ -6,12 +8,12 @@
 # Ported from an OCaml version
 #
 
-abstract BTree
+abstract type BTree end
 
-type Empty <: BTree
+mutable struct Empty <: BTree
 end
 
-type Node <: BTree
+mutable struct Node <: BTree
     info
     left::BTree
     right::BTree

@@ -1,3 +1,5 @@
+# This file is a part of Julia. License is MIT: http://julialang.org/license
+
 # Support for @fastmath
 
 # This module provides versions of math functions that may violate
@@ -21,7 +23,9 @@ module FastMath
 
 export @fastmath
 
-import Core.Intrinsics: box, unbox, powi_llvm, sqrt_llvm_fast
+import Core.Intrinsics: sqrt_llvm_fast, neg_float_fast,
+    add_float_fast, sub_float_fast, mul_float_fast, div_float_fast, rem_float_fast,
+    eq_float_fast, ne_float_fast, lt_float_fast, le_float_fast
 
 const fast_op =
     Dict(# basic arithmetic
@@ -38,7 +42,6 @@ const fast_op =
          :cmp => :cmp_fast,
          :conj => :conj_fast,
          :inv => :inv_fast,
-         :mod => :mod_fast,
          :rem => :rem_fast,
          :sign => :sign_fast,
          :isfinite => :isfinite_fast,
@@ -86,14 +89,17 @@ const rewrite_op =
          :^= => :^)
 
 function make_fastmath(expr::Expr)
+    if expr.head === :quote
+        return expr
+    end
     op = get(rewrite_op, expr.head, :nothing)
-    if op != :nothing
+    if op !== :nothing
         var = expr.args[1]
         rhs = expr.args[2]
         if isa(var, Symbol)
             # simple assignment
-            expr = :($var = $(op)($var, $rhs))
-        elseif isa(var, Expr) && var.head == :ref
+            expr = :($var = $op($var, $rhs))
+        elseif isa(var, Expr) && var.head === :ref
             # array reference
             arr = var.args[1]
             inds = tuple(var.args[2:end]...)
@@ -102,7 +108,7 @@ function make_fastmath(expr::Expr)
             expr = quote
                 $(Expr(:(=), arrvar, arr))
                 $(Expr(:(=), Expr(:tuple, indvars...), Expr(:tuple, inds...)))
-                $(arrvar)[$(indvars...)] = $(op)($(arrvar)[$(indvars...)], $rhs)
+                $arrvar[$(indvars...)] = $op($arrvar[$(indvars...)], $rhs)
             end
         end
     end
@@ -110,10 +116,10 @@ function make_fastmath(expr::Expr)
 end
 function make_fastmath(symb::Symbol)
     fast_symb = get(fast_op, symb, :nothing)
-    if fast_symb == :nothing
+    if fast_symb === :nothing
         return symb
     end
-    :(Base.FastMath.$(fast_symb))
+    :(Base.FastMath.$fast_symb)
 end
 make_fastmath(expr) = expr
 
@@ -122,24 +128,17 @@ macro fastmath(expr)
 end
 
 
-
-
 # Basic arithmetic
 
-FloatTypes = Union(Float32, Float64)
+FloatTypes = Union{Float32, Float64}
 
-sub_fast{T<:FloatTypes}(x::T) = box(T,Base.neg_float_fast(unbox(T,x)))
+sub_fast(x::FloatTypes) = neg_float_fast(x)
 
-add_fast{T<:FloatTypes}(x::T, y::T) =
-    box(T,Base.add_float_fast(unbox(T,x), unbox(T,y)))
-sub_fast{T<:FloatTypes}(x::T, y::T) =
-    box(T,Base.sub_float_fast(unbox(T,x), unbox(T,y)))
-mul_fast{T<:FloatTypes}(x::T, y::T) =
-    box(T,Base.mul_float_fast(unbox(T,x), unbox(T,y)))
-div_fast{T<:FloatTypes}(x::T, y::T) =
-    box(T,Base.div_float_fast(unbox(T,x), unbox(T,y)))
-rem_fast{T<:FloatTypes}(x::T, y::T) =
-    box(T,Base.rem_float_fast(unbox(T,x), unbox(T,y)))
+add_fast{T<:FloatTypes}(x::T, y::T) = add_float_fast(x, y)
+sub_fast{T<:FloatTypes}(x::T, y::T) = sub_float_fast(x, y)
+mul_fast{T<:FloatTypes}(x::T, y::T) = mul_float_fast(x, y)
+div_fast{T<:FloatTypes}(x::T, y::T) = div_float_fast(x, y)
+rem_fast{T<:FloatTypes}(x::T, y::T) = rem_float_fast(x, y)
 
 add_fast{T<:FloatTypes}(x::T, y::T, zs::T...) =
     add_fast(add_fast(x, y), zs...)
@@ -148,20 +147,12 @@ mul_fast{T<:FloatTypes}(x::T, y::T, zs::T...) =
 
 @fastmath begin
     cmp_fast{T<:FloatTypes}(x::T, y::T) = ifelse(x==y, 0, ifelse(x<y, -1, +1))
-    function mod_fast{T<:FloatTypes}(x::T, y::T)
-        r = rem(x,y)
-        ifelse((r > 0) $ (y > 0), r+y, r)
-    end
 end
 
-eq_fast{T<:FloatTypes}(x::T, y::T) =
-    Base.eq_float_fast(unbox(T,x),unbox(T,y))
-ne_fast{T<:FloatTypes}(x::T, y::T) =
-    Base.ne_float_fast(unbox(T,x),unbox(T,y))
-lt_fast{T<:FloatTypes}(x::T, y::T) =
-    Base.lt_float_fast(unbox(T,x),unbox(T,y))
-le_fast{T<:FloatTypes}(x::T, y::T) =
-    Base.le_float_fast(unbox(T,x),unbox(T,y))
+eq_fast{T<:FloatTypes}(x::T, y::T) = eq_float_fast(x, y)
+ne_fast{T<:FloatTypes}(x::T, y::T) = ne_float_fast(x, y)
+lt_fast{T<:FloatTypes}(x::T, y::T) = lt_float_fast(x, y)
+le_fast{T<:FloatTypes}(x::T, y::T) = le_float_fast(x, y)
 
 isinf_fast(x) = false
 isfinite_fast(x) = true
@@ -170,37 +161,66 @@ issubnormal_fast(x) = false
 
 # complex numbers
 
-ComplexTypes = Union(Complex64, Complex128)
+ComplexTypes = Union{Complex64, Complex128}
 
 @fastmath begin
-    div_fast{T<:FloatTypes}(x::Complex{T}, y::T) =
-        Complex{T}(real(x)/y, imag(x)/y)
-
-    abs_fast{T<:ComplexTypes}(x::T) = hypot(real(x), imag(x))
-    abs2_fast{T<:ComplexTypes}(x::T) = real(x)*real(x) + imag(x)*imag(x)
-    add_fast{T<:ComplexTypes}(x::T, y::T) = T(real(x)+real(y), imag(x)+imag(y))
+    abs_fast(x::ComplexTypes) = hypot(real(x), imag(x))
+    abs2_fast(x::ComplexTypes) = real(x)*real(x) + imag(x)*imag(x)
     conj_fast{T<:ComplexTypes}(x::T) = T(real(x), -imag(x))
-    function div_fast{T<:ComplexTypes}(x::T, y::T)
-        T(real(x)*real(y) + imag(x)*imag(y),
-           imag(x)*real(y) - real(x)*imag(y)) / abs2(y)
-    end
-    inv_fast{T<:ComplexTypes}(x::T) = conj(x) / abs2(x)
-    sign_fast{T<:ComplexTypes}(x::T) = x / abs(x)
-    sub_fast{T<:ComplexTypes}(x::T, y::T) = T(real(x)-real(y), imag(x)-imag(y))
-    function mul_fast{T<:ComplexTypes}(x::T, y::T)
+    inv_fast(x::ComplexTypes) = conj(x) / abs2(x)
+    sign_fast(x::ComplexTypes) = x == 0 ? float(zero(x)) : x/abs(x)
+
+    add_fast{T<:ComplexTypes}(x::T, y::T) =
+        T(real(x)+real(y), imag(x)+imag(y))
+    add_fast{T<:FloatTypes}(x::Complex{T}, b::T) =
+        Complex{T}(real(x)+b, imag(x))
+    add_fast{T<:FloatTypes}(a::T, y::Complex{T}) =
+        Complex{T}(a+real(y), imag(y))
+
+    sub_fast{T<:ComplexTypes}(x::T, y::T) =
+        T(real(x)-real(y), imag(x)-imag(y))
+    sub_fast{T<:FloatTypes}(x::Complex{T}, b::T) =
+        Complex{T}(real(x)-b, imag(x))
+    sub_fast{T<:FloatTypes}(a::T, y::Complex{T}) =
+        Complex{T}(a-real(y), -imag(y))
+
+    mul_fast{T<:ComplexTypes}(x::T, y::T) =
         T(real(x)*real(y) - imag(x)*imag(y),
-           real(x)*imag(y) + imag(x)*real(y))
-    end
+          real(x)*imag(y) + imag(x)*real(y))
+    mul_fast{T<:FloatTypes}(x::Complex{T}, b::T) =
+        Complex{T}(real(x)*b, imag(x)*b)
+    mul_fast{T<:FloatTypes}(a::T, y::Complex{T}) =
+        Complex{T}(a*real(y), a*imag(y))
+
+    @inline div_fast{T<:ComplexTypes}(x::T, y::T) =
+        T(real(x)*real(y) + imag(x)*imag(y),
+          imag(x)*real(y) - real(x)*imag(y)) / abs2(y)
+    div_fast{T<:FloatTypes}(x::Complex{T}, b::T) =
+        Complex{T}(real(x)/b, imag(x)/b)
+    div_fast{T<:FloatTypes}(a::T, y::Complex{T}) =
+        Complex{T}(a*real(y), -a*imag(y)) / abs2(y)
 
     eq_fast{T<:ComplexTypes}(x::T, y::T) =
         (real(x)==real(y)) & (imag(x)==imag(y))
+    eq_fast{T<:FloatTypes}(x::Complex{T}, b::T) =
+        (real(x)==b) & (imag(x)==T(0))
+    eq_fast{T<:FloatTypes}(a::T, y::Complex{T}) =
+        (a==real(y)) & (T(0)==imag(y))
+
     ne_fast{T<:ComplexTypes}(x::T, y::T) = !(x==y)
 end
 
 # fall-back implementations and type promotion
 
-for op in (:+, :-, :*, :/, :(==), :!=, :<, :<=,
-           :abs, :abs2, :cmp, :conj, :inv, :mod, :rem, :sign)
+for op in (:abs, :abs2, :conj, :inv, :sign)
+    op_fast = fast_op[op]
+    @eval begin
+        # fall-back implementation for non-numeric types
+        $op_fast(xs...) = $op(xs...)
+    end
+end
+
+for op in (:+, :-, :*, :/, :(==), :!=, :<, :<=, :cmp, :rem)
     op_fast = fast_op[op]
     @eval begin
         # fall-back implementation for non-numeric types
@@ -214,17 +234,16 @@ for op in (:+, :-, :*, :/, :(==), :!=, :<, :<=,
 end
 
 
-
 # Math functions
 
 # builtins
 
-pow_fast{T<:FloatTypes}(x::T, y::Integer) =
-    box(T, Base.powi_llvm(unbox(T,x), unbox(Int32,Int32(y))))
+pow_fast(x::Float32, y::Integer) = ccall("llvm.powi.f32", llvmcall, Float32, (Float32, Int32), x, y)
+pow_fast(x::Float64, y::Integer) = ccall("llvm.powi.f64", llvmcall, Float64, (Float64, Int32), x, y)
 
 # TODO: Change sqrt_llvm intrinsic to avoid nan checking; add nan
 # checking to sqrt in math.jl; remove sqrt_llvm_fast intrinsic
-sqrt_fast{T<:FloatTypes}(x::T) = box(T, Base.sqrt_llvm_fast(unbox(T,x)))
+sqrt_fast(x::FloatTypes) = sqrt_llvm_fast(x)
 
 # libm
 
@@ -276,30 +295,30 @@ atan2_fast(x::Float64, y::Float64) =
     pow_fast{T<:FloatTypes}(x::Complex{T}, y::T) = exp(y*log(x))
     acos_fast{T<:ComplexTypes}(x::T) =
         convert(T,π)/2 + im*log(im*x + sqrt(1-x*x))
-    acosh_fast{T<:ComplexTypes}(x::T) = log(x + sqrt(x+1) * sqrt(x-1))
-    angle_fast{T<:ComplexTypes}(x::T) = atan2(imag(x), real(x))
-    asin_fast{T<:ComplexTypes}(x::T) = -im*asinh(im*x)
-    asinh_fast{T<:ComplexTypes}(x::T) = log(x + sqrt(1+x*x))
-    atan_fast{T<:ComplexTypes}(x::T) = -im*atanh(im*x)
+    acosh_fast(x::ComplexTypes) = log(x + sqrt(x+1) * sqrt(x-1))
+    angle_fast(x::ComplexTypes) = atan2(imag(x), real(x))
+    asin_fast(x::ComplexTypes) = -im*asinh(im*x)
+    asinh_fast(x::ComplexTypes) = log(x + sqrt(1+x*x))
+    atan_fast(x::ComplexTypes) = -im*atanh(im*x)
     atanh_fast{T<:ComplexTypes}(x::T) = convert(T,1)/2*(log(1+x) - log(1-x))
-    cis_fast{T<:ComplexTypes}(x::T) = T(cos(x), sin(x))
-    cos_fast{T<:ComplexTypes}(x::T) = cosh(im*x)
+    cis_fast(x::ComplexTypes) = exp(-imag(x)) * cis(real(x))
+    cos_fast(x::ComplexTypes) = cosh(im*x)
     cosh_fast{T<:ComplexTypes}(x::T) = convert(T,1)/2*(exp(x) + exp(-x))
     exp10_fast{T<:ComplexTypes}(x::T) =
         exp10(real(x)) * cis(imag(x)*log(convert(T,10)))
     exp2_fast{T<:ComplexTypes}(x::T) =
         exp2(real(x)) * cis(imag(x)*log(convert(T,2)))
-    exp_fast{T<:ComplexTypes}(x::T) = exp(real(x)) * cis(imag(x))
-    expm1_fast{T<:ComplexTypes}(x::T) = exp(x)-1
+    exp_fast(x::ComplexTypes) = exp(real(x)) * cis(imag(x))
+    expm1_fast(x::ComplexTypes) = exp(x)-1
     log10_fast{T<:ComplexTypes}(x::T) = log(x) / log(convert(T,10))
-    log1p_fast{T<:ComplexTypes}(x::T) = log(1+x)
+    log1p_fast(x::ComplexTypes) = log(1+x)
     log2_fast{T<:ComplexTypes}(x::T) = log(x) / log(convert(T,2))
     log_fast{T<:ComplexTypes}(x::T) = T(log(abs2(x))/2, angle(x))
-    sin_fast{T<:ComplexTypes}(x::T) = -im*sinh(im*x)
+    sin_fast(x::ComplexTypes) = -im*sinh(im*x)
     sinh_fast{T<:ComplexTypes}(x::T) = convert(T,1)/2*(exp(x) - exp(-x))
-    sqrt_fast{T<:ComplexTypes}(x::T) = sqrt(abs(x)) * cis(angle(x)/2)
-    tan_fast{T<:ComplexTypes}(x::T) = -im*tanh(im*x)
-    tanh_fast{T<:ComplexTypes}(x::T) = (a=exp(x); b=exp(-x); (a-b)/(a+b))
+    sqrt_fast(x::ComplexTypes) = sqrt(abs(x)) * cis(angle(x)/2)
+    tan_fast(x::ComplexTypes) = -im*tanh(im*x)
+    tanh_fast(x::ComplexTypes) = (a=exp(x); b=exp(-x); (a-b)/(a+b))
 end
 
 # fall-back implementations and type promotion
@@ -311,7 +330,6 @@ for f in (:acos, :acosh, :angle, :asin, :asinh, :atan, :atanh, :cbrt,
     f_fast = fast_op[f]
     @eval begin
         $f_fast(x) = $f(x)
-        @vectorize_1arg Number $f_fast
     end
 end
 
@@ -324,7 +342,6 @@ for f in (:^, :atan2, :hypot, :max, :min, :minmax)
         $f_fast(x::Number, y::Number) = $f_fast(promote(x, y)...)
         # fall-back implementation that applies after promotion
         $f_fast{T<:Number}(x::T, y::T) = $f(x, y)
-        @vectorize_2arg Number $f_fast
     end
 end
 

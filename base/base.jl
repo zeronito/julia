@@ -1,272 +1,153 @@
-const NonTupleType = Union(DataType,UnionType,TypeConstructor)
+# This file is a part of Julia. License is MIT: http://julialang.org/license
 
-typealias Callable Union(Function,DataType)
+"""
+    SystemError(prefix::AbstractString, [errno::Int32])
 
-const Bottom = Union()
-
-# constructors for Core types in boot.jl
-call(T::Type{BoundsError}) = Core.call(T)
-call(T::Type{BoundsError}, args...) = Core.call(T, args...)
-call(T::Type{DivideError}) = Core.call(T)
-call(T::Type{DomainError}) = Core.call(T)
-call(T::Type{OverflowError}) = Core.call(T)
-call(T::Type{InexactError}) = Core.call(T)
-call(T::Type{OutOfMemoryError}) = Core.call(T)
-call(T::Type{StackOverflowError}) = Core.call(T)
-call(T::Type{UndefRefError}) = Core.call(T)
-call(T::Type{UndefVarError}, var::Symbol) = Core.call(T, var)
-call(T::Type{InterruptException}) = Core.call(T)
-call(T::Type{SymbolNode}, name::Symbol, t::ANY) = Core.call(T, name, t)
-call(T::Type{GlobalRef}, modu, name::Symbol) = Core.call(T, modu, name)
-call(T::Type{ASCIIString}, d::Array{UInt8,1}) = Core.call(T, d)
-call(T::Type{UTF8String}, d::Array{UInt8,1}) = Core.call(T, d)
-call(T::Type{TypeVar}, args...) = Core.call(T, args...)
-call(T::Type{TypeConstructor}, args...) = Core.call(T, args...)
-call(T::Type{Expr}, args::ANY...) = _expr(args...)
-call(T::Type{LineNumberNode}, n::Int) = Core.call(T, n)
-call(T::Type{LabelNode}, n::Int) = Core.call(T, n)
-call(T::Type{GotoNode}, n::Int) = Core.call(T, n)
-call(T::Type{QuoteNode}, x::ANY) = Core.call(T, x)
-call(T::Type{NewvarNode}, s::Symbol) = Core.call(T, s)
-call(T::Type{TopNode}, s::Symbol) = Core.call(T, s)
-call(T::Type{Module}, args...) = Core.call(T, args...)
-call(T::Type{Task}, f::ANY) = Core.call(T, f)
-call(T::Type{GenSym}, n::Int) = Core.call(T, n)
-call(T::Type{WeakRef}) = Core.call(T)
-call(T::Type{WeakRef}, v::ANY) = Core.call(T, v)
-
-call{T}(::Type{T}, args...) = convert(T, args...)::T
-
-convert{T}(::Type{T}, x::T) = x
-
-convert(::(), ::()) = ()
-convert(::Type{Tuple}, x::Tuple) = x
-
-argtail(x, rest...) = rest
-tail(x::Tuple) = argtail(x...)
-
-convert(T::(Type, Type...), x::(Any, Any...)) =
-    tuple(convert(T[1],x[1]), convert(tail(T), tail(x))...)
-convert(T::(Any, Any...), x::(Any, Any...)) =
-    tuple(convert(T[1],x[1]), convert(tail(T), tail(x))...)
-
-convert{T}(::Type{(T...)}, x::Tuple) = cnvt_all(T, x...)
-cnvt_all(T) = ()
-cnvt_all(T, x, rest...) = tuple(convert(T,x), cnvt_all(T, rest...)...)
-
-# conversions used by ccall
-ptr_arg_cconvert{T}(::Type{Ptr{T}}, x) = cconvert(T, x)
-ptr_arg_unsafe_convert{T}(::Type{Ptr{T}}, x) = unsafe_convert(T, x)
-ptr_arg_unsafe_convert(::Type{Ptr{Void}}, x) = x
-
-cconvert(T::Type, x) = convert(T, x) # do the conversion eagerly in most cases
-cconvert{P<:Ptr}(::Type{P}, x) = x # but defer the conversion to Ptr to unsafe_convert
-unsafe_convert{T}(::Type{T}, x::T) = x # unsafe_convert (like convert) defaults to assuming the convert occurred
-unsafe_convert{P<:Ptr}(::Type{P}, x::Ptr) = convert(P, x)
-
-reinterpret{T,S}(::Type{T}, x::S) = box(T,unbox(S,x))
-
-abstract IO
-
-type ErrorException <: Exception
-    msg::AbstractString
-end
-
-type SystemError <: Exception
+A system call failed with an error code (in the `errno` global variable).
+"""
+mutable struct SystemError <: Exception
     prefix::AbstractString
     errnum::Int32
-    SystemError(p::AbstractString, e::Integer) = new(p, e)
+    extrainfo
+    SystemError(p::AbstractString, e::Integer, extrainfo) = new(p, e, extrainfo)
+    SystemError(p::AbstractString, e::Integer) = new(p, e, nothing)
     SystemError(p::AbstractString) = new(p, Libc.errno())
 end
 
-type TypeError <: Exception
-    func::Symbol
-    context::AbstractString
-    expected::Type
-    got
-end
+"""
+    ParseError(msg)
 
-type ParseError <: Exception
+The expression passed to the `parse` function could not be interpreted as a valid Julia
+expression.
+"""
+mutable struct ParseError <: Exception
     msg::AbstractString
 end
 
-type ArgumentError <: Exception
+"""
+    ArgumentError(msg)
+
+The parameters to a function call do not match a valid signature. Argument `msg` is a
+descriptive error string.
+"""
+mutable struct ArgumentError <: Exception
     msg::AbstractString
 end
 
-#type UnboundError <: Exception
-#    var::Symbol
-#end
+"""
+    KeyError(key)
 
-type KeyError <: Exception
+An indexing operation into an `Associative` (`Dict`) or `Set` like object tried to access or
+delete a non-existent element.
+"""
+mutable struct KeyError <: Exception
     key
 end
 
-type LoadError <: Exception
+"""
+    MethodError(f, args)
+
+A method with the required type signature does not exist in the given generic function.
+Alternatively, there is no unique most-specific method.
+"""
+mutable struct MethodError <: Exception
+    f
+    args
+    world::UInt
+    MethodError(f::ANY, args::ANY, world::UInt) = new(f, args, world)
+end
+MethodError(f::ANY, args::ANY) = MethodError(f, args, typemax(UInt))
+
+"""
+    EOFError()
+
+No more data was available to read from a file or stream.
+"""
+mutable struct EOFError <: Exception end
+
+"""
+    DimensionMismatch([msg])
+
+The objects called do not have matching dimensionality. Optional argument `msg` is a
+descriptive error string.
+"""
+mutable struct DimensionMismatch <: Exception
+    msg::AbstractString
+end
+DimensionMismatch() = DimensionMismatch("")
+
+"""
+    AssertionError([msg])
+
+The asserted condition did not evaluate to `true`.
+Optional argument `msg` is a descriptive error string.
+"""
+mutable struct AssertionError <: Exception
+    msg::AbstractString
+    AssertionError() = new("")
+    AssertionError(msg) = new(msg)
+end
+
+#Generic wrapping of arbitrary exceptions
+#Subtypes should put the exception in an 'error' field
+abstract type WrappedException <: Exception end
+
+"""
+    LoadError(file::AbstractString, line::Int, error)
+
+An error occurred while `include`ing, `require`ing, or `using` a file. The error specifics
+should be available in the `.error` field.
+"""
+mutable struct LoadError <: WrappedException
     file::AbstractString
     line::Int
     error
 end
 
-type MethodError <: Exception
-    f
-    args
-end
+"""
+    InitError(mod::Symbol, error)
 
-type EOFError <: Exception end
-
-type DimensionMismatch <: Exception
-    msg::AbstractString
-end
-DimensionMismatch() = DimensionMismatch("")
-
-type AssertionError <: Exception
-    msg::AbstractString
-
-    AssertionError() = new("")
-    AssertionError(msg) = new(msg)
-end
-
-# For passing constants through type inference
-immutable Val{T}
+An error occurred when running a module's `__init__` function. The actual error thrown is
+available in the `.error` field.
+"""
+mutable struct InitError <: WrappedException
+    mod::Symbol
+    error
 end
 
 ccall(:jl_get_system_hooks, Void, ())
 
 
-# index colon
-type Colon
-end
-const (:) = Colon()
-
 ==(w::WeakRef, v::WeakRef) = isequal(w.value, v.value)
 ==(w::WeakRef, v) = isequal(w.value, v)
 ==(w, v::WeakRef) = isequal(w, v.value)
 
-function finalizer(o::ANY, f::Union(Function,Ptr))
+function finalizer(o::ANY, f::ANY)
     if isimmutable(o)
         error("objects of type ", typeof(o), " cannot be finalized")
     end
-    ccall(:jl_gc_add_finalizer, Void, (Any,Any), o, f)
+    ccall(:jl_gc_add_finalizer_th, Void, (Ptr{Void}, Any, Any),
+          Core.getptls(), o, f)
 end
-
-finalize(o::ANY) = ccall(:jl_finalize, Void, (Any,), o)
-
-gc(full::Bool=true) = ccall(:jl_gc_collect, Void, (Cint,), full)
-gc_enable() = Bool(ccall(:jl_gc_enable, Cint, ()))
-gc_disable() = Bool(ccall(:jl_gc_disable, Cint, ()))
-
-bytestring(str::ByteString) = str
-
-identity(x) = x
-
-function append_any(xs...)
-    # used by apply() and quote
-    # must be a separate function from append(), since apply() needs this
-    # exact function.
-    out = Array(Any, 4)
-    l = 4
-    i = 1
-    for x in xs
-        for y in x
-            if i > l
-                ccall(:jl_array_grow_end, Void, (Any, UInt), out, 16)
-                l += 16
-            end
-            arrayset(out, y, i)
-            i += 1
-        end
+function finalizer{T}(o::T, f::Ptr{Void})
+    @_inline_meta
+    if isimmutable(T)
+        error("objects of type ", T, " cannot be finalized")
     end
-    ccall(:jl_array_del_end, Void, (Any, UInt), out, l-i+1)
-    out
+    ccall(:jl_gc_add_ptr_finalizer, Void, (Ptr{Void}, Any, Ptr{Void}),
+          Core.getptls(), o, f)
 end
 
-# used by { } syntax
-function cell_1d(xs::ANY...)
-    n = length(xs)
-    a = Array(Any,n)
-    for i=1:n
-        arrayset(a,xs[i],i)
-    end
-    a
-end
+finalize(o::ANY) = ccall(:jl_finalize_th, Void, (Ptr{Void}, Any,),
+                         Core.getptls(), o)
 
-function cell_2d(nr, nc, xs::ANY...)
-    a = Array(Any,nr,nc)
-    for i=1:(nr*nc)
-        arrayset(a,xs[i],i)
-    end
-    a
-end
+gc(full::Bool=true) = ccall(:jl_gc_collect, Void, (Int32,), full)
+gc_enable(on::Bool) = ccall(:jl_gc_enable, Int32, (Int32,), on) != 0
 
-# simple Array{Any} operations needed for bootstrap
-setindex!(A::Array{Any}, x::ANY, i::Real) = arrayset(A, x, to_index(i))
-
-function length_checked_equal(args...)
-    n = length(args[1])
-    for i=2:length(args)
-        if length(args[i]) != n
-            error("argument dimensions must match")
-        end
-    end
-    n
-end
-
-map(f::Function, a::Array{Any,1}) = Any[ f(a[i]) for i=1:length(a) ]
-
-function precompile(f::ANY, args::Tuple)
-    if isa(f,DataType)
-        args = tuple(Type{f}, args...)
-        f = f.name.module.call
-    end
-    if isgeneric(f)
-        ccall(:jl_compile_hint, Void, (Any, Any), f, args)
-    end
-end
-
-esc(e::ANY) = Expr(:escape, e)
-
-macro boundscheck(yesno,blk)
-    # hack: use this syntax since it avoids introducing line numbers
-    :($(Expr(:boundscheck,yesno));
-      $(esc(blk));
-      $(Expr(:boundscheck,:pop)))
-end
-
-macro inbounds(blk)
-    :(@boundscheck false $(esc(blk)))
-end
-
-macro label(name::Symbol)
-    Expr(:symboliclabel, name)
-end
-
-macro goto(name::Symbol)
-    Expr(:symbolicgoto, name)
-end
-
-call{T,N}(::Type{Array{T}}, d::NTuple{N,Int}) =
-    ccall(:jl_new_array, Array{T,N}, (Any,Any), Array{T,N}, d)
-call{T}(::Type{Array{T}}, d::Integer...) = Array{T}(convert((Int...), d))
-
-call{T}(::Type{Array{T}}, m::Integer) =
-    ccall(:jl_alloc_array_1d, Array{T,1}, (Any,Int), Array{T,1}, m)
-call{T}(::Type{Array{T}}, m::Integer, n::Integer) =
-    ccall(:jl_alloc_array_2d, Array{T,2}, (Any,Int,Int), Array{T,2}, m, n)
-call{T}(::Type{Array{T}}, m::Integer, n::Integer, o::Integer) =
-    ccall(:jl_alloc_array_3d, Array{T,3}, (Any,Int,Int,Int), Array{T,3}, m, n, o)
-
-# TODO: possibly turn these into deprecations
-Array{T,N}(::Type{T}, d::NTuple{N,Int}) = Array{T}(d)
-Array{T}(::Type{T}, d::Integer...)      = Array{T}(convert((Int...), d))
-Array{T}(::Type{T}, m::Integer)                       = Array{T}(m)
-Array{T}(::Type{T}, m::Integer,n::Integer)            = Array{T}(m,n)
-Array{T}(::Type{T}, m::Integer,n::Integer,o::Integer) = Array{T}(m,n,o)
-
-immutable Nullable{T}
-    isnull::Bool
+struct Nullable{T}
+    hasvalue::Bool
     value::T
 
-    Nullable() = new(true)
-    Nullable(value::T) = new(false, value)
+    Nullable{T}() where {T} = new(false)
+    Nullable{T}(value::T, hasvalue::Bool=true) where {T} = new(hasvalue, value)
 end

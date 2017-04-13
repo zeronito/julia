@@ -1,9 +1,11 @@
+# This file is a part of Julia. License is MIT: http://julialang.org/license
+
 module Time
 export TimeDelta
 
 import Base.show, Base.+, Base.-, Base.convert, Base.promote_rule
 
-immutable TimeDelta{p}
+struct TimeDelta{p}
     v::Int64
 end
 
