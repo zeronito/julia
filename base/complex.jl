@@ -897,6 +897,10 @@ function complex(A::AbstractArray{T}) where T
     convert(AbstractArray{typeof(complex(zero(T)))}, A)
 end
 
-## promotion to complex ##
+## Promotion to complex ##
 
 _default_type(T::Type{Complex}) = Complex{Int}
+
+## Machine epsilon for complex ##
+
+eps(z::Complex{T}) where {T<:AbstractFloat} = hypot(eps(real(z)), eps(imag(z)))
