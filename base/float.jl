@@ -713,7 +713,7 @@ end
     eps(::Type{Float16}) = $(bitcast(Float16, 0x1400))
     eps(::Type{Float32}) = $(bitcast(Float32, 0x34000000))
     eps(::Type{Float64}) = $(bitcast(Float64, 0x3cb0000000000000))
-    eps(::Type{Complex{T}}) where {T<:AbstractFloat} = eps(T)
+    eps(::Type{Complex{T}}) where {T<:AbstractFloat} = sqrt(2*one(T))*eps(T)
     eps() = eps(Float64)
 end
 
