@@ -2058,9 +2058,10 @@ end
 # issue #18363
 @test_throws DimensionMismatch cumsum!([0,0], 1:4)
 @test cumsum(Any[])::Vector{Any} == Any[]
-@test cumsum(Any[1, 2.3])::Vector{Any} == [1, 3.3] == cumsum(Real[1, 2.3])::Vector{Real}
+@test cumsum(Any[1, 2.3]) == [1, 3.3] == cumsum(Real[1, 2.3])::Vector{Real}
 @test cumsum([true,true,true]) == [1,2,3]
-@test cumsum(0x00:0xff)[end] === 0x80 # overflow
+@test cumsum(0x00:0xff)[end] === UInt(255*(255+1)÷2) # no overflow
+@test accumulate(+, 0x00:0xff)[end] === 0x80         # overflow
 @test cumsum([[true], [true], [false]])::Vector{Vector{Int}} == [[1], [2], [2]]
 
 #issue #18336
@@ -2282,6 +2283,8 @@ end
 
 Base.ArithmeticStyle(::Type{F21666{T}}) where {T} = T()
 Base.:+(x::F, y::F) where {F <: F21666} = F(x.x + y.x)
+Base.:+(x::F) where {F <: F21666} = x
+
 Float64(x::F21666) = Float64(x.x)
 @testset "Exactness of cumsum # 21666" begin
     # test that cumsum uses more stable algorithm
@@ -2410,4 +2413,26 @@ Base.view(::T25958, args...) = args
     @test t[end,1,end]   == @view(t[end,1,end])   == @views t[end,1,end]
     @test t[end,end,1]   == @view(t[end,end,1])   == @views t[end,end,1]
     @test t[end,end,end] == @view(t[end,end,end]) == @views t[end,end,end]
+end
+
+@testset "accumulate on non-numeric types" begin
+    @test accumulate((acc, x) -> acc+x[1], 0, [(1,2), (3,4), (5,6)]) == [1, 4, 9]
+    @test accumulate(*, ['a', 'b']) == ["a", "ab"]
+    @inferred accumulate(*, String[])
+    @test accumulate(*, ['a' 'b'; 'c' 'd'], dims=1) == ["a" "b"; "ac" "bd"]
+    @test accumulate(*, ['a' 'b'; 'c' 'd'], dims=2) == ["a" "ab"; "c" "cd"]
+end
+
+@testset "accumulate promotion" begin
+    U = cumsum(Any[1,1//1,1f0,1.0,big(1.0)])
+    @test U[1] == 1
+    @test U[1] isa Int
+    @test U[2] == 2
+    @test U[2] isa Rational{Int}
+    @test U[3] == 3
+    @test U[3] isa Float32
+    @test U[4] == 4
+    @test U[4] isa Float64
+    @test U[5] == 5
+    @test U[5] isa BigFloat
 end

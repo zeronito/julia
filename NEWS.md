@@ -1008,6 +1008,9 @@ Deprecated or removed
     argument instead of defaulting to using the first dimension unless there is only
     one dimension ([#24684], [#25457]).
 
+  * `cumsum` and `cumprod` have the same promotion behaviour for small integer types as `sum` and
+    `prod`. Use `accumulate(+, x)`/`accumulate(*,x)` to get non-promoting behaviour ([#25766]).
+
   * The `sum_kbn` and `cumsum_kbn` functions have been moved to the
     [KahanSummation](https://github.com/JuliaMath/KahanSummation.jl) package ([#24869]).
 
@@ -1430,6 +1433,7 @@ Command-line option changes
 [#25725]: https://github.com/JuliaLang/julia/issues/25725
 [#25745]: https://github.com/JuliaLang/julia/issues/25745
 [#25763]: https://github.com/JuliaLang/julia/issues/25763
+[#25766]: https://github.com/JuliaLang/julia/issues/25766
 [#25786]: https://github.com/JuliaLang/julia/issues/25786
 [#25812]: https://github.com/JuliaLang/julia/issues/25812
 [#25815]: https://github.com/JuliaLang/julia/issues/25815
