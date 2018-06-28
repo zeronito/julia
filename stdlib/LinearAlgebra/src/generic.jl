@@ -440,6 +440,8 @@ function norm(itr, p::Real=2)
     end
 end
 
+vertbracket(iter) = norm(iter)
+
 """
     norm(x::Number, p::Real=2)
 
@@ -729,6 +731,8 @@ function dot(x::AbstractVector, y::AbstractVector)
     return s
 end
 
+
+anglebracket(x, y) = dot(x, y)
 
 ###########################################################################################
 
