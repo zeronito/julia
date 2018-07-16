@@ -1499,7 +1499,7 @@ julia> using Base.Threads
 julia> nthreads()
 4
 
-julia> acc = Ref(0)
+julia> acc = &0
 Base.RefValue{Int64}(0)
 
 julia> @threads for i in 1:1000
