@@ -430,3 +430,11 @@ end
     @test findnext(isequal(1), (2, 3), 1) === nothing
     @test findprev(isequal(1), (2, 3), 2) === nothing
 end
+
+@testset "isassigned" begin
+    t = (1, 2, 3)
+    @test isassigned(t, 0) === false
+    @test isassigned(t, 1) === true
+    @test isassigned(t, 3) === true
+    @test isassigned(t, 4) === false
+end
