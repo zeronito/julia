@@ -376,7 +376,7 @@ struct Tridiagonal{T,V<:AbstractVector{T}} <: AbstractMatrix{T}
     dl::V    # sub-diagonal
     d::V     # diagonal
     du::V    # sup-diagonal
-    du2::V   # supsup-diagonal for pivoting in LU
+    du2::Union{Nothing, V}   # supsup-diagonal for pivoting in LU
     function Tridiagonal{T,V}(dl, d, du) where {T,V<:AbstractVector{T}}
         @assert !has_offset_axes(dl, d, du)
         n = length(d)
@@ -385,15 +385,23 @@ struct Tridiagonal{T,V<:AbstractVector{T}} <: AbstractMatrix{T}
                 "lengths of subdiagonal, diagonal and superdiagonal: ",
                 "($(length(dl)), $(length(d)), $(length(du)))")))
         end
-        new{T,V}(dl, d, du)
+        new{T,V}(dl, d, du, nothing)
     end
     # constructor used in lu!
     function Tridiagonal{T,V}(dl, d, du, du2) where {T,V<:AbstractVector{T}}
         @assert !has_offset_axes(dl, d, du, du2)
+        n = length(d)
+        if (length(dl) != n-1 || length(du) != n-1 || (!isa(du2, Nothing) && length(du2) != n-2))
+            throw(ArgumentError(string("cannot construct Tridiagonal from incompatible ",
+            "lengths of subdiagonal, diagonal and superdiagonal: ",
+            "($(length(dl)), $(length(d)), $(length(du)), $(length(du2)))")))
+        end
         # length checks?
         new{T,V}(dl, d, du, du2)
     end
 end
+Tridiagonal{T, V}(A::Tridiagonal) where {T, V<:AbstractVector{T}} = Tridiagonal(map(x->convert(V, x), (A.dl, A.d, A.du))...)
+Tridiagonal{T, V}(A::SymTridiagonal) where {T, V<:AbstractVector{T}} = Tridiagonal(map(x->convert(V, x), (A.ev, A.dv, A.ev))...)
 
 """
     Tridiagonal(dl::V, d::V, du::V) where V <: AbstractVector
@@ -425,6 +433,9 @@ Tridiagonal(dl::V, d::V, du::V, du2::V) where {T,V<:AbstractVector{T}} = Tridiag
 function Tridiagonal{T}(dl::AbstractVector, d::AbstractVector, du::AbstractVector) where {T}
     Tridiagonal(map(x->convert(AbstractVector{T}, x), (dl, d, du))...)
 end
+function Tridiagonal{T}(dl::AbstractVector, d::AbstractVector, du::AbstractVector, du2::AbstractVector) where {T}
+    Tridiagonal(map(x->convert(AbstractVector{T}, x), (dl, d, du, du2))...)
+end
 
 """
     Tridiagonal(A)
@@ -452,14 +463,12 @@ julia> Tridiagonal(A)
 Tridiagonal(A::AbstractMatrix) = Tridiagonal(diag(A,-1), diag(A,0), diag(A,1))
 
 Tridiagonal(A::Tridiagonal) = A
-Tridiagonal{T}(A::Tridiagonal{T}) where {T} = A
+Tridiagonal{T}(A::SymTridiagonal) where T = Tridiagonal{T}(A.ev, A.dv, A.ev)
 function Tridiagonal{T}(A::Tridiagonal) where {T}
-    dl, d, du = map(x->convert(AbstractVector{T}, x)::AbstractVector{T},
-                    (A.dl, A.d, A.du))
-    if isdefined(A, :du2)
-        Tridiagonal(dl, d, du, convert(AbstractVector{T}, A.du2)::AbstractVector{T})
+    if !isa(A.du2, Nothing)
+        Tridiagonal{T}(A.dl, A.d, A.du, A.du2)
     else
-        Tridiagonal(dl, d, du)
+        Tridiagonal{T}(A.dl, A.d, A.du)
     end
 end
 
