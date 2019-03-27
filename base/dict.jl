@@ -45,9 +45,6 @@ end
 
 # Dict
 
-# These can be changed, to trade off better performance for space
-const global maxallowedprobe = 16
-const global maxprobeshift   = 6
 
 """
     Dict([itr])
@@ -86,7 +83,7 @@ mutable struct Dict{K,V} <: AbstractDict{K,V}
     maxprobe::Int
 
     function Dict{K,V}() where V where K
-        n = 16
+        n = 8 #count = 0, 1, 2 most common for small long-term storage dicts
         new(zeros(UInt8,n), Vector{K}(undef, n), Vector{V}(undef, n), 0, 0, 0, 1, 0)
     end
     function Dict{K,V}(d::Dict{K,V}) where V where K
@@ -167,9 +164,11 @@ empty(a::AbstractDict, ::Type{K}, ::Type{V}) where {K, V} = Dict{K, V}()
 
 hashindex(key, sz) = (((hash(key)%Int) & (sz-1)) + 1)::Int
 
-@propagate_inbounds isslotempty(h::Dict, i::Int) = h.slots[i] == 0x0
-@propagate_inbounds isslotfilled(h::Dict, i::Int) = h.slots[i] == 0x1
-@propagate_inbounds isslotmissing(h::Dict, i::Int) = h.slots[i] == 0x2
+@propagate_inbounds isslotempty(h::Dict, i::Int) = h.slots[i] == 0x00
+@propagate_inbounds isslotfilled(h::Dict, i::Int) = h.slots[i] == 0x01
+@propagate_inbounds isslotmissing(h::Dict, i::Int) = h.slots[i] == 0x02
+
+#todo: new functions for size computations. Split off logic from rehash!.
 
 function rehash!(h::Dict{K,V}, newsz = length(h.keys)) where V where K
     olds = h.slots
@@ -177,7 +176,7 @@ function rehash!(h::Dict{K,V}, newsz = length(h.keys)) where V where K
     oldv = h.vals
     sz = length(olds)
     newsz = _tablesz(newsz)
-    h.age += 1
+    h.age += 1 + (1<<32)
     h.idxfloor = 1
     if h.count == 0
         resize!(h.slots, newsz)
@@ -186,6 +185,7 @@ function rehash!(h::Dict{K,V}, newsz = length(h.keys)) where V where K
         resize!(h.vals, newsz)
         h.ndel = 0
         return h
+        #todo: sizehint?
     end
 
     slots = zeros(UInt8,newsz)
@@ -205,7 +205,7 @@ function rehash!(h::Dict{K,V}, newsz = length(h.keys)) where V where K
             end
             probe = (index - index0) & (newsz-1)
             probe > maxprobe && (maxprobe = probe)
-            slots[index] = 0x1
+            slots[index] = 0x01
             keys[index] = k
             vals[index] = v
             count += 1
@@ -229,6 +229,8 @@ function rehash!(h::Dict{K,V}, newsz = length(h.keys)) where V where K
 end
 
 function sizehint!(d::Dict{T}, newsz) where T
+    #todo: proper growth and regenerate logic
+    #we can shrink without problems, below comments outdated
     oldsz = length(d.slots)
     if newsz <= oldsz
         # todo: shrink
@@ -272,10 +274,11 @@ function empty!(h::Dict{K,V}) where V where K
     h.age += 1
     h.idxfloor = 1
     return h
+    #todo: This should shrink the dict? Also sizehint the buffers?
 end
 
 # get the index where a key is stored, or -1 if not present
-function ht_keyindex(h::Dict{K,V}, key) where V where K
+@inline function ht_keyindex(h::Dict{K,V}, key) where V where K
     sz = length(h.keys)
     iter = 0
     maxprobe = h.maxprobe
@@ -298,9 +301,8 @@ function ht_keyindex(h::Dict{K,V}, key) where V where K
 end
 
 # get the index where a key is stored, or -pos if not present
-# and the key would be inserted at pos
-# This version is for use by setindex! and get!
-function ht_keyindex2!(h::Dict{K,V}, key) where V where K
+#adjusts maxprobe
+@inline function ht_keyindex2!(h::Dict{K,V}, key) where V where K
     age0 = h.age
     sz = length(h.keys)
     iter = 0
@@ -334,9 +336,8 @@ function ht_keyindex2!(h::Dict{K,V}, key) where V where K
 
     avail < 0 && return avail
 
-    maxallowed = max(maxallowedprobe, sz>>maxprobeshift)
     # Check if key is not present, may need to keep searching to find slot
-    @inbounds while iter < maxallowed
+    @inbounds while true
         if !isslotfilled(h,index)
             h.maxprobe = iter
             return -index
@@ -344,14 +345,11 @@ function ht_keyindex2!(h::Dict{K,V}, key) where V where K
         index = (index & (sz-1)) + 1
         iter += 1
     end
-
-    rehash!(h, h.count > 64000 ? sz*2 : sz*4)
-
-    return ht_keyindex2!(h, key)
 end
 
 @propagate_inbounds function _setindex!(h::Dict, v, key, index)
-    h.slots[index] = 0x1
+    h.ndel -= (h.slots[index]==0x02)
+    h.slots[index] = 0x2
     h.keys[index] = key
     h.vals[index] = v
     h.count += 1
@@ -366,6 +364,7 @@ end
         # > 3/4 deleted or > 2/3 full
         rehash!(h, h.count > 64000 ? h.count*2 : h.count*4)
     end
+    #todo: proper growth and regenerate logic (regenerate: too many deleted slots)
 end
 
 function setindex!(h::Dict{K,V}, v0, key0) where V where K
@@ -571,13 +570,14 @@ end
 
 function _pop!(h::Dict, index)
     @inbounds val = h.vals[index]
-    _delete!(h, index)
+    _delete_clean!(h, index)
     return val
 end
 
 function pop!(h::Dict, key)
     index = ht_keyindex(h, key)
     return index > 0 ? _pop!(h, index) : throw(KeyError(key))
+    #todo: proper shrink logic
 end
 
 """
@@ -618,6 +618,42 @@ function pop!(h::Dict)
     key => val
 end
 
+@inline function _delete_clean!(h::Dict{K,V}, index) where {K,V}
+    isbitstype(K) || isbitsunion(K) || ccall(:jl_arrayunset, Cvoid, (Any, UInt), h.keys, index-1)
+    isbitstype(V) || isbitsunion(V) || ccall(:jl_arrayunset, Cvoid, (Any, UInt), h.vals, index-1)
+    off = 3
+    if (index-off -1)%UInt <= length(h.slots)-8
+        p = convert(Ptr{UInt64}, pointer(h.slots, index-off))
+        c = xor(ltoh(unsafe_load(p)), 0x0000000000000003<<(off*8))
+        del =  c & 0x0202020202020202
+        nonempty = del | ( (c & 0x0101010101010101)<<1 )
+        remdel = del & ( (~nonempty) >>8 )
+        remdel |= del & (remdel>>8)
+        remdel |= del & (remdel>>8)
+        remdel |= del & (remdel>>8)
+        unsafe_store!(p, htol(xor(c, remdel)))
+        h.count -= 1
+        h.age += 1
+        h.ndel += 1 - count_ones(remdel)
+    else
+        @inbounds h.slots[index] = 0x02
+        idx = (index<=off? 1: length(h.slots)-7)
+        p = convert(Ptr{UInt64}, pointer(h.slots, idx))
+        c = ltoh(unsafe_load(p))
+        del =  c & 0x0202020202020202
+        nonempty = del | ( (c & 0x0101010101010101)<<1 )
+        remdel = del & ( (~nonempty) >>8 )
+        remdel |= del & (remdel>>8)
+        remdel |= del & (remdel>>8)
+        remdel |= del & (remdel>>8)
+        unsafe_store!(p, htol(xor(c, remdel)))
+        h.count -= 1
+        h.age += 1
+        h.ndel += 1 - count_ones(remdel)
+    end
+    return h
+end
+
 function _delete!(h::Dict{K,V}, index) where {K,V}
     @inbounds h.slots[index] = 0x2
     isbitstype(K) || isbitsunion(K) || ccall(:jl_arrayunset, Cvoid, (Any, UInt), h.keys, index-1)
@@ -650,9 +686,10 @@ delete!(collection, key)
 function delete!(h::Dict, key)
     index = ht_keyindex(h, key)
     if index > 0
-        _delete!(h, index)
+        _delete_clean!(h, index)
     end
     return h
+    #todo: proper shrink logic    
 end
 
 function skip_deleted(h::Dict, i)
@@ -668,23 +705,69 @@ function skip_deleted_floor!(h::Dict)
     idx
 end
 
-@propagate_inbounds _iterate(t::Dict{K,V}, i) where {K,V} = i > length(t.vals) ? nothing : (Pair{K,V}(t.keys[i],t.vals[i]), i+1)
-@propagate_inbounds function iterate(t::Dict)
-    _iterate(t, skip_deleted_floor!(t))
+@inline function _iterate(h::Dict)
+    isempty(h) && return nothing #always length(h.slots) >= 16
+    return _iterate(h, (1, ltoh(unsafe_load(convert(Ptr{UInt64}, pointer(h.slots)),1)) & 0x0101010101010101))
 end
-@propagate_inbounds iterate(t::Dict, i) = _iterate(t, skip_deleted(t, i))
+
+@inline function _iterate(h::Dict, s)
+    i,c = s
+    while c == 0
+        i % UInt >= (length(h.slots)>>3) && return nothing
+        i += 1
+        c = ltoh(unsafe_load(convert(Ptr{UInt64}, pointer(h.slots)),i)) & 0x0101010101010101
+    end
+    idx = 1 + (i-1)<<3 + trailing_zeros(c)>>3
+
+    return  idx, (i, _blsr(c))
+end
+
+function iterate(h::Dict{K,V}) where {K,V}
+    isempty(h) && return nothing
+    s = _iterate(h)
+    s === nothing && return nothing
+    i, state = s
+    @inbounds return Pair{K,V}(h.keys[i], h.vals[i]), state
+end
+
+function iterate(h::Dict{K,V}, state) where {K,V}
+    s = _iterate(h, state)
+    s === nothing && return nothing
+    i, state = s
+    @inbounds return Pair{K,V}(h.keys[i], h.vals[i]), state
+end
 
 isempty(t::Dict) = (t.count == 0)
 length(t::Dict) = t.count
 
-@propagate_inbounds function iterate(v::Union{KeySet{<:Any, <:Dict}, ValueIterator{<:Dict}},
-                                     i=v.dict.idxfloor)
-    i = skip_deleted(v.dict, i)
-    i > length(v.dict.vals) && return nothing
-    (v isa KeySet ? v.dict.keys[i] : v.dict.vals[i], i+1)
+@propagate_inbounds function iterate(v::Union{KeySet{<:Any, <:Dict}, ValueIterator{<:Dict}})
+    isempty(v.dict) && return nothing
+    is = _iterate(v.dict)
+    is === nothing && return nothing
+    i,s = is
+    (v isa KeySet ? v.dict.keys[i] : v.dict.vals[i], s)
 end
 
-filter!(f, d::Dict) = filter_in_one_pass!(f, d)
+@propagate_inbounds function iterate(v::Union{KeySet{<:Any, <:Dict}, ValueIterator{<:Dict}}, s)
+    is = _iterate(v.dict, s)
+    is === nothing && return nothing
+    i,s = is
+    (v isa KeySet ? v.dict.keys[i] : v.dict.vals[i], s)
+end
+
+function filter!(pred, h::Dict{K,V}) where {K,V}
+    isempty(h) && return h
+    is = _iterate(h)
+    @inbounds while is !== nothing
+        i, state = is
+        if !pred(Pair{K,V}(h.keys[i], h.vals[i]))
+            _delete!(h, i)
+        end
+        is = _iterate(h, state)
+    end
+    #todo: clean up deleted slots, maybe shrink
+    return h
+end
 
 function map!(f, iter::ValueIterator{<:Dict})
     dict = iter.dict
