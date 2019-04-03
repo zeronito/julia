@@ -17,6 +17,9 @@ New language features
   * `nextfloat(::BigFloat, n::Integer)` and `prevfloat(::BigFloat, n::Integer)` methods
     have been added ([#31310]).
 
+  * A new syntax `for f.(...)` is added to create a non-`materialize`d `Broadcasted` object
+    from a given "dot call" expression ([#19198]).
+
 Multi-threading changes
 -----------------------
 
