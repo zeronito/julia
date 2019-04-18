@@ -92,13 +92,6 @@ end
 
 ## comparison ##
 
-function cmp(a::String, b::String)
-    al, bl = sizeof(a), sizeof(b)
-    c = ccall(:memcmp, Int32, (Ptr{UInt8}, Ptr{UInt8}, UInt),
-              a, b, min(al,bl))
-    return c < 0 ? -1 : c > 0 ? +1 : cmp(al,bl)
-end
-
 function ==(a::String, b::String)
     pointer_from_objref(a) == pointer_from_objref(b) && return true
     al = sizeof(a)
