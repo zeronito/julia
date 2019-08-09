@@ -102,7 +102,16 @@ iterate(t::NamedTuple, iter=1) = iter > nfields(t) ? nothing : (getfield(t, iter
 firstindex(t::NamedTuple) = 1
 lastindex(t::NamedTuple) = nfields(t)
 getindex(t::NamedTuple, i::Int) = getfield(t, i)
+getindex(t::NamedTuple, i::Integer) = t[to_index(i)]
 getindex(t::NamedTuple, i::Symbol) = getfield(t, i)
+function getindex(t::NamedTuple, v::AbstractVector{Bool})
+    length(t) == length(v) || throw(BoundsError(t, v))
+    return t[to_index(v)]
+end
+getindex(t::NamedTuple, v::AbstractVector) = (; map(v) do i
+          k = i isa Symbol ? i : keys(t)[i]
+          return k => t[i]
+     end...)
 indexed_iterate(t::NamedTuple, i::Int, state=1) = (getfield(t, i), i+1)
 isempty(::NamedTuple{()}) = true
 isempty(::NamedTuple) = false
