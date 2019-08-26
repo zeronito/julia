@@ -160,7 +160,6 @@ function generate_precompile_statements()
         include_time = @elapsed for statement in sort(collect(statements))
             # println(statement)
             # Workarounds for #28808
-            occursin("\"YYYY-mm-dd\\THH:MM:SS\"", statement) && continue
             statement == "precompile(Tuple{typeof(Base.show), Base.IOContext{Base.TTY}, Type{Vararg{Any, N} where N}})" && continue
             # check for `#x##s66` style variable names not in quotes
             occursin(r"#\w", statement) &&

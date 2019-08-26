@@ -846,7 +846,14 @@ static size_t jl_static_show_x_(JL_STREAM *out, jl_value_t *v, jl_datatype_t *vt
             n += jl_printf(out, "Symbol(\"");
         else
             n += jl_printf(out, ":");
-        n += jl_printf(out, "%s", sn);
+        char buf[64];
+        size_t i = 0, ninc = 0, sz = strlen(sn);
+        while (i < sz) {
+            ninc = u8_escape(buf, sizeof(buf), sn, &i, sz, 1, 0) - 1;
+            n += ninc;
+            jl_uv_puts(out, buf, ninc);
+        }
+        n += sz;
         if (quoted)
             n += jl_printf(out, "\")");
     }
@@ -968,22 +975,33 @@ static size_t jl_static_show_x_(JL_STREAM *out, jl_value_t *v, jl_datatype_t *vt
     else if (jl_datatype_type && jl_is_datatype(vt)) {
         int istuple = jl_is_tuple_type(vt), isnamedtuple = jl_is_namedtuple_type(vt);
         size_t tlen = jl_datatype_nfields(vt);
-        if (isnamedtuple) {
-            if (tlen == 0)
-                n += jl_printf(out, "NamedTuple");
-        }
-        else if (!istuple) {
-            n += jl_static_show_x(out, (jl_value_t*)vt, depth);
-        }
-        n += jl_printf(out, "(");
         size_t nb = jl_datatype_size(vt);
         if (nb > 0 && tlen == 0) {
             uint8_t *data = (uint8_t*)v;
-            n += jl_printf(out, "0x");
-            for(int i = nb - 1; i >= 0; --i)
-                n += jl_printf(out, "%02" PRIx8, data[i]);
-        }
-        else {
+            n += jl_printf(out, "reinterpret(");
+            n += jl_static_show_x(out, (jl_value_t*)vt, depth);
+            n += jl_printf(out, ", 0x");
+            uint32_t a = 0x01020304;
+            uint8_t *endian_bom = (uint8_t*) &a;
+            if (*endian_bom == 0x01) { // big endian
+                for(int i = 0; i < nb; ++i)
+                    n += jl_printf(out, "%02" PRIx8, data[i]);
+            } else if (*endian_bom == 0x04) { // little endian
+                for(int i = nb - 1; i >= 0; --i)
+                    n += jl_printf(out, "%02" PRIx8, data[i]);
+            } else {
+                assert(0); // unsupported endianness
+            }
+            n += jl_printf(out, ")");
+        } else {
+            if (isnamedtuple) {
+                if (tlen == 0)
+                    n += jl_printf(out, "NamedTuple");
+            }
+            else if (!istuple) {
+                n += jl_static_show_x(out, (jl_value_t*)vt, depth);
+            }
+            n += jl_printf(out, "(");
             size_t i = 0;
             if (vt == jl_typemap_entry_type)
                 i = 1;
@@ -1014,8 +1032,8 @@ static size_t jl_static_show_x_(JL_STREAM *out, jl_value_t *v, jl_datatype_t *vt
                 n += jl_printf(out, ", next=↩︎\n  ");
                 n += jl_static_show_next_(out, (jl_value_t*)((jl_typemap_entry_t*)v)->next, v, depth);
             }
+            n += jl_printf(out, ")");
         }
-        n += jl_printf(out, ")");
     }
     else {
         n += jl_printf(out, "<?#%p::", (void*)v);
