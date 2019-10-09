@@ -975,6 +975,7 @@ export
     @nospecialize,
     @specialize,
     @polly,
+    @nonans,
 
     @assert,
     @__dot__,
