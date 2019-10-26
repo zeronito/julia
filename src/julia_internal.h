@@ -38,6 +38,12 @@ void __sanitizer_finish_switch_fiber(void*, const void**, size_t*);
 #endif
 #endif
 
+#if defined(__has_include)
+#if __has_include(<features.h>)
+#include <features.h>
+#endif
+#endif
+
 // Remove when C11 is required for C code.
 #ifndef static_assert
 #  ifndef __cplusplus
@@ -1004,7 +1010,7 @@ STATIC_INLINE void *jl_malloc_aligned(size_t sz, size_t align)
 STATIC_INLINE void *jl_realloc_aligned(void *d, size_t sz, size_t oldsz,
                                        size_t align)
 {
-#if defined(_P64) || defined(__APPLE__)
+#if defined(_P64) || defined(__APPLE__) || defined(__GLIBC__)
     if (align <= 16)
         return realloc(d, sz);
 #endif
