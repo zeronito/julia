@@ -75,6 +75,10 @@ Standard library changes
 
 #### SparseArrays
 
+#### Statistics
+
+* Added Keyword arguments `lt`, `by`, `middle` and `rev` to `median` ([#30329]).
+
 #### Dates
 
 #### Statistics

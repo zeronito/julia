@@ -747,33 +747,36 @@ julia> middle(a)
 middle(a::AbstractArray) = ((v1, v2) = extrema(a); middle(v1, v2))
 
 """
-    median!(v)
+    median!(v; lt=isless, by=identity, middle=middle, rev=false)
+
+Compute the median of an array `v`. For an even number of elements no exact
+median element exists, so the result is equivalent to calculating the mean of the two
+median elements. The `lt` keyword allows providing a custom "less than" function for sorting
+prior to taking the median. The `by` keyword lets you provide a function that will be
+applied to each element before comparison. In the case of non-numerical, even length `v`,
+the first of the two middle elements according to the provided ordering is returned as the median.
+One can choose the second of the two middle elements by reversing the sort order with `rev=true`.
+A custom `middle` function has to be provided when `middle` isn't defined for the input type, otherwise
+an error is thrown.
 
 Like [`median`](@ref), but may overwrite the input vector.
 """
-function median!(v::AbstractVector)
+function median!(v::AbstractVector; lt=isless, by=identity, middle=middle, rev=false)
     isempty(v) && throw(ArgumentError("median of an empty array is undefined, $(repr(v))"))
     eltype(v)>:Missing && any(ismissing, v) && return missing
     (eltype(v)<:AbstractFloat || eltype(v)>:AbstractFloat) && any(isnan, v) && return convert(eltype(v), NaN)
     inds = axes(v, 1)
     n = length(inds)
     mid = div(first(inds)+last(inds),2)
-    if isodd(n)
-        return middle(partialsort!(v,mid))
-    else
-        m = partialsort!(v, mid:mid+1)
-        return middle(m[1], m[2])
-    end
+    middle(partialsort!(v, isodd(n) ? mid : (mid:mid+1), lt=lt, by=by, rev=rev))
 end
-median!(v::AbstractArray) = median!(vec(v))
+median!(v::AbstractArray; lt=isless, by=identity, middle=middle, rev=false) =
+    median!(vec(v), lt=lt, by=by, middle=middle, rev=rev)
 
 """
-    median(itr)
+    median(itr; lt=isless, by=identity, middle=middle, rev=false)
 
 Compute the median of all elements in a collection.
-For an even number of elements no exact median element exists, so the result is
-equivalent to calculating mean of two median elements.
-
 !!! note
     If `itr` contains `NaN` or [`missing`](@ref) values, the result is also
     `NaN` or `missing` (`missing` takes precedence if `itr` contains both).
@@ -795,10 +798,11 @@ julia> median(skipmissing([1, 2, missing, 4]))
 2.0
 ```
 """
-median(itr) = median!(collect(itr))
+median(itr; lt=isless, by=identity, middle=middle, rev=false) =
+    median!(collect(itr); lt=lt, by=by, middle=middle, rev=rev)
 
 """
-    median(A::AbstractArray; dims)
+    median(A::AbstractArray; dims, lt=isless, by=identity, middle=middle, rev=false)
 
 Compute the median of an array along the given dimensions.
 
@@ -809,11 +813,14 @@ julia> median([1 2; 3 4], dims=1)
  2.0  3.0
 ```
 """
-median(v::AbstractArray; dims=:) = _median(v, dims)
+median(v::AbstractArray; dims=:, lt=isless, by=identity, middle=middle, rev=false) =
+    _median(v, dims, lt, by, middle, rev)
 
-_median(v::AbstractArray, dims) = mapslices(median!, v, dims = dims)
+_median(v::AbstractArray, dims, lt, by, middle, rev) =
+    mapslices(v -> median!(v, lt=lt, by=by, middle=middle, rev=rev), v, dims = dims)
 
-_median(v::AbstractArray{T}, ::Colon) where {T} = median!(copyto!(Array{T,1}(undef, length(v)), v))
+_median(v::AbstractArray{T}, ::Colon, lt, by, middle, rev) where {T} =
+    median!(copyto!(Array{T,1}(undef, length(v)), v), lt=lt, by=by, middle=middle, rev=rev)
 
 # for now, use the R/S definition of quantile; may want variants later
 # see ?quantile in R -- this is type 7
