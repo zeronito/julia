@@ -1393,6 +1393,28 @@ function _inferred(ex, mod, allow = :(Union{}))
 end
 
 """
+    isequal_nolines(a, b)
+
+Compare two Expr trees for equality, ignoring LineNumberNodes, so that otherwise identical
+Exprs defined in two different locations will still compare equal.
+
+# Example
+```jldoctest
+julia> a = quote 1 end;  # Line: #= REPL[1]:1 =#
+
+julia> b = quote 1 end;  # Line: #= REPL[2]:1 =#
+
+julia> Test.isequal_nolines(a, b)
+true
+```
+
+See also: [`isapprox`](@ref) for _numerical_ approximate equality
+"""
+function isequal_nolines(a, b)
+    Base.remove_linenums!(a) == Base.remove_linenums!(b)
+end
+
+"""
     detect_ambiguities(mod1, mod2...; imported=false, recursive=false, ambiguous_bottom=false)
 
 Returns a vector of `(Method,Method)` pairs of ambiguous methods

@@ -784,6 +784,14 @@ end
 # Pointer 0-arg constructor
 @test Ptr{Cvoid}() == C_NULL
 
+@testset "remove_linenums!" begin
+    # Ensure line information is removed from macro calls
+    ex = :(@macro argument)
+    @test any(arg->arg isa LineNumberNode, ex.args)
+    Base.remove_linenums!(ex)
+    @test all(arg->!(arg isa LineNumberNode) || arg == LineNumberNode(1, :none), ex.args)
+end
+
 # Finalizer with immutable should throw
 @test_throws ErrorException finalizer(x->nothing, 1)
 @test_throws ErrorException finalizer(C_NULL, 1)
