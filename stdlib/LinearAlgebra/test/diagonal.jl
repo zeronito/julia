@@ -635,6 +635,26 @@ end
     end
 end
 
+@testset "opnorms" begin
+    D = Diagonal([1,-2,3,-4])
+
+    @test opnorm(D, 1) == opnorm(Matrix(D), 1)
+    @test opnorm(D, 2) ≈ opnorm(Matrix(D), 2)
+    @test opnorm(D, Inf) == opnorm(Matrix(D), Inf)
+
+    D = Diagonal([-11])
+    @test opnorm(D, 1) == opnorm(Matrix(D), 1)
+    @test opnorm(D, 2) ≈ opnorm(Matrix(D), 2)
+    @test opnorm(D, Inf) == opnorm(Matrix(D), Inf)
+
+    # block diagonal matrices
+    D = Diagonal([[1 2; 3 4], [5 6; 7 8]])
+    A = [1 2 0 0; 3 4 0 0; 0 0 5 6; 0 0 7 8] # full matrix of D
+    @test opnorm(D, 1) == opnorm(A, 1)
+    @test opnorm(D, 2) ≈ opnorm(A, 2)
+    @test opnorm(D, Inf) == opnorm(A, Inf)
+end
+
 @testset "eigenvalue sorting" begin
     D = Diagonal([0.4, 0.2, -1.3])
     @test eigvals(D) == eigen(D).values == [0.4, 0.2, -1.3] # not sorted by default

@@ -463,6 +463,30 @@ end
     @test A90\b90 ≈ inv(A90)*b90
 end
 
+@testset "opnorms" begin
+    T = Tridiagonal([1,2,3], [1,-2,3,-4], [1,2,3])
+
+    @test opnorm(T, 1) == opnorm(Matrix(T), 1)
+    @test_skip opnorm(T, 2) ≈ opnorm(Matrix(T), 2) # currently missing
+    @test opnorm(T, Inf) == opnorm(Matrix(T), Inf)
+
+    S = SymTridiagonal([1,-2,3,-4], [1,2,3])
+
+    @test opnorm(S, 1) == opnorm(Matrix(S), 1)
+    @test_skip opnorm(S, 2) ≈ opnorm(Matrix(S), 2) # currently missing
+    @test opnorm(S, Inf) == opnorm(Matrix(S), Inf)
+
+    T = Tridiagonal(Int[], [-5], Int[])
+    @test opnorm(T, 1) == opnorm(Matrix(T), 1)
+    @test_skip opnorm(T, 2) ≈ opnorm(Matrix(T), 2) # currently missing
+    @test opnorm(T, Inf) == opnorm(Matrix(T), Inf)
+
+    S = SymTridiagonal(T)
+    @test opnorm(S, 1) == opnorm(Matrix(S), 1)
+    @test_skip opnorm(S, 2) ≈ opnorm(Matrix(S), 2) # currently missing
+    @test opnorm(S, Inf) == opnorm(Matrix(S), Inf)
+end
+
 @testset "singular values of SymTridiag" begin
     @test svdvals(SymTridiagonal([-4,2,3], [0,0])) ≈ [4,3,2]
     @test svdvals(SymTridiagonal(collect(0.:10.), zeros(10))) ≈ reverse(0:10)

@@ -720,6 +720,41 @@ function SymTridiagonal{T}(M::Tridiagonal) where T
     end
 end
 
+###################
+#     opnorms     #
+###################
+
+# Tridiagonal
+
+function _opnorm1Inf(A::Tridiagonal, p)
+    size(A, 1) == 1 && return norm(first(A.d))
+    case = p == Inf
+    lowerrange, upperrange = case ? (1:length(A.dl)-1, 2:length(A.dl)) : (2:length(A.dl), 1:length(A.dl)-1)
+    normfirst, normend = case ? (norm(first(A.d))+norm(first(A.du)), norm(last(A.dl))+norm(last(A.d))) : (norm(first(A.d))+norm(first(A.dl)), norm(last(A.du))+norm(last(A.d)))
+
+    return max(
+                mapreduce(t -> sum(norm, t),
+                    max,
+                    zip(view(A.d, (2:length(A.d)-1)), view(A.dl, lowerrange), view(A.du, upperrange))
+                ),
+                normfirst, normend)
+end
+
+# SymTridiagonal
+
+function _opnorm1Inf(A::SymTridiagonal, p::Real)
+    size(A, 1) == 1 && return norm(first(A.dv))
+    lowerrange, upperrange = 1:length(A.ev)-1, 2:length(A.ev)
+    normfirst, normend = norm(first(A.dv))+norm(first(A.ev)), norm(last(A.ev))+norm(last(A.dv))
+
+    return max(
+                mapreduce(t -> sum(norm, t),
+                    max,
+                    zip(view(A.dv, (2:length(A.dv)-1)), view(A.ev, lowerrange), view(A.ev, upperrange))
+                ),
+                normfirst, normend)
+end
+
 Base._sum(A::Tridiagonal, ::Colon) = sum(A.d) + sum(A.dl) + sum(A.du)
 Base._sum(A::SymTridiagonal, ::Colon) = sum(A.dv) + 2sum(A.ev)
 
