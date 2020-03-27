@@ -596,4 +596,14 @@ a = Dates.Time(23, 1, 1)
     @test length(utm_typemin:-Millisecond(1):utm_typemin) == 1
 end
 
+# https://github.com/JuliaLang/julia/issues/35203
+yr = Date(1852):Year(4):Date(1940)
+@test Base.RangeStepStyle(yr) === Base.RangeStepIrregular()
+y21 = yr[21+1]
+@test findfirst(isequal(y21), yr) == findfirst(isequal(y21), collect(yr))
+mr = Date(1998,8,7):Month(1):Date(2001,9,11)
+@test Base.RangeStepStyle(mr) === Base.RangeStepIrregular()
+m36 = mr[36+1]
+@test findfirst(isequal(m36), mr) == findfirst(isequal(m36), collect(mr))
+
 end  # RangesTest module
