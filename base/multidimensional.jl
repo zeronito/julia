@@ -987,28 +987,21 @@ function copyto!(dest::AbstractArray{T1,N}, src::AbstractArray{T2,N}) where {T1,
     return dest
 end
 
-function copyto!(dest::AbstractArray{T1,N}, Rdest::CartesianIndices{N},
-                  src::AbstractArray{T2,N}, Rsrc::CartesianIndices{N}) where {T1,T2,N}
+function copyto!(dest::AbstractArray{T1,N1}, Rdest::CartesianIndices{N1},
+                  src::AbstractArray{T2,N2}, Rsrc::CartesianIndices{N2}) where {T1,T2,N1,N2}
     isempty(Rdest) && return dest
-    if size(Rdest) != size(Rsrc)
+    if N1 == N2 && size(Rdest) != size(Rsrc)
         throw(ArgumentError("source and destination must have same size (got $(size(Rsrc)) and $(size(Rdest)))"))
+    elseif length(Rdest) != length(Rsrc)
+        throw(ArgumentError("source and destination must have same length (got $(length(Rsrc)) and $(length(Rdest)))"))
     end
     checkbounds(dest, first(Rdest))
     checkbounds(dest, last(Rdest))
     checkbounds(src, first(Rsrc))
     checkbounds(src, last(Rsrc))
     src′ = unalias(dest, src)
-    ΔI = first(Rdest) - first(Rsrc)
-    if @generated
-        quote
-            @nloops $N i (n->Rsrc.indices[n]) begin
-                @inbounds @nref($N,dest,n->i_n+ΔI[n]) = @nref($N,src′,i)
-            end
-        end
-    else
-        for I in Rsrc
-            @inbounds dest[I + ΔI] = src′[I]
-        end
+    for (Is, Id) in zip(Rsrc, Rdest)
+        @inbounds dest[Id] = src′[Is]
     end
     dest
 end
@@ -1017,7 +1010,8 @@ end
     copyto!(dest, Rdest::CartesianIndices, src, Rsrc::CartesianIndices) -> dest
 
 Copy the block of `src` in the range of `Rsrc` to the block of `dest`
-in the range of `Rdest`. The sizes of the two regions must match.
+in the range of `Rdest`. The sizes of the two ranges must match, but the ranks of `src` and
+`dest` may differ.
 """
 copyto!(::AbstractArray, ::CartesianIndices, ::AbstractArray, ::CartesianIndices)
 
