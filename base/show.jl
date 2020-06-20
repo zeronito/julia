@@ -394,6 +394,12 @@ function _show_default(io::IO, @nospecialize(x))
     t = typeof(x)
     show(io, inferencebarrier(t))
     print(io, '(')
+    show_fields(io, x)
+    print(io, ')')
+end
+
+function show_fields(io::IO, @nospecialize(x))
+    t = typeof(x)
     nf = nfields(x)
     nb = sizeof(x)
     if nf != 0 || nb == 0
@@ -422,7 +428,6 @@ function _show_default(io::IO, @nospecialize(x))
             end
         end
     end
-    print(io,')')
 end
 
 # Check if a particular symbol is exported from a standard library module

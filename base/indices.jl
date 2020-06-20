@@ -358,7 +358,14 @@ unsafe_length(S::Slice) = unsafe_length(S.indices)
 getindex(S::Slice, i::Int) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
 getindex(S::Slice, i::AbstractUnitRange{<:Integer}) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
 getindex(S::Slice, i::StepRange{<:Integer}) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
-show(io::IO, r::Slice) = print(io, "Base.Slice(", r.indices, ")")
+
+function show(io::IO, r::Slice)
+    show(io, typeof(r).name)
+    print(io, "(")
+    show_fields(io, r)
+    print(io, ")")
+end
+
 iterate(S::Slice, s...) = iterate(S.indices, s...)
 
 
@@ -389,7 +396,14 @@ unsafe_length(S::IdentityUnitRange) = unsafe_length(S.indices)
 getindex(S::IdentityUnitRange, i::Int) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
 getindex(S::IdentityUnitRange, i::AbstractUnitRange{<:Integer}) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
 getindex(S::IdentityUnitRange, i::StepRange{<:Integer}) = (@_inline_meta; @boundscheck checkbounds(S, i); i)
-show(io::IO, r::IdentityUnitRange) = print(io, "Base.IdentityUnitRange(", r.indices, ")")
+
+function show(io::IO, r::IdentityUnitRange)
+    show(io, typeof(r).name)
+    print(io, "(")
+    show_fields(io, r)
+    print(io, ")")
+end
+
 iterate(S::IdentityUnitRange, s...) = iterate(S.indices, s...)
 
 """
