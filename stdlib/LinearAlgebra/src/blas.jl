@@ -110,6 +110,8 @@ openblas_get_config() = strip(unsafe_string(ccall((@blasfunc(openblas_get_config
     set_num_threads(n)
 
 Set the number of threads the BLAS library should use.
+If `n <= 0` then the number of threads will not be changed.
+If `n`  is greater than number of CPU threads, then the number of BLAS threads will be set to the number of CPU threads.
 """
 function set_num_threads(n::Integer)
     blas = vendor()
