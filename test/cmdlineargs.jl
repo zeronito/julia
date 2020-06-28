@@ -77,7 +77,7 @@ let exename = `$(Base.julia_cmd()) --startup-file=no`
         # make sure this is a non-fatal error and the REPL still loads
         @test v[1]
         @test isempty(v[2])
-        @test startswith(v[3], "┌ Warning: Failed to import InteractiveUtils into module Main\n")
+        @test startswith(v[3], "⎡ Warning: Failed to import InteractiveUtils into module Main\n")
     end
     real_threads = string(ccall(:jl_cpu_threads, Int32, ()))
     for nc in ("0", "-2", "x", "2x", " ", "")

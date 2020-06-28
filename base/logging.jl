@@ -582,14 +582,14 @@ function handle_message(logger::SimpleLogger, level, message, _module, group, id
     iob = IOContext(buf, logger.stream)
     levelstr = level == Warn ? "Warning" : string(level)
     msglines = split(chomp(string(message)), '\n')
-    println(iob, "┌ ", levelstr, ": ", msglines[1])
+    println(iob, "⎡ ", levelstr, ": ", msglines[1])
     for i in 2:length(msglines)
-        println(iob, "│ ", msglines[i])
+        println(iob, "⎜ ", msglines[i])
     end
     for (key, val) in kwargs
-        println(iob, "│   ", key, " = ", val)
+        println(iob, "⎜   ", key, " = ", val)
     end
-    println(iob, "└ @ ", something(_module, "nothing"), " ",
+    println(iob, "⎣ @ ", something(_module, "nothing"), " ",
             something(filepath, "nothing"), ":", something(line, "nothing"))
     write(logger.stream, take!(buf))
     nothing
