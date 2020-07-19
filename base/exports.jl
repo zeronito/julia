@@ -821,7 +821,7 @@ export
     seekend,
     seekstart,
     skip,
-    skipchars,
+    skipuntil,
     take!,
     truncate,
     unmark,

@@ -452,6 +452,8 @@ The delimiter can be a `UInt8`, `AbstractChar`, string, or vector.
 Keyword argument `keep` controls whether the delimiter is included in the result.
 The text is assumed to be encoded in UTF-8.
 
+See also: [`skipuntil`](@ref)
+
 # Examples
 ```jldoctest
 julia> open("my_file.txt", "w") do io
@@ -1087,35 +1089,44 @@ Commit all currently buffered writes to the given stream.
 flush(io::IO) = nothing
 
 """
-    skipchars(predicate, io::IO; linecomment=nothing)
+    skipuntil(predicate, io::IO; linecomment=nothing)
 
-Advance the stream `io` such that the next-read character will be the first remaining for
-which `predicate` returns `false`. If the keyword argument `linecomment` is specified, all
-characters from that character until the start of the next line are ignored.
+Advance `io` until `predicate(peek(c)) === true`.
+
+If the keyword argument `linecomment` is specified, all characters
+from that character until the start of the next line are ignored.
+
+!!! compat "Julia 1.6"
+    `skipuntil` was added to replace `skipchars` in Julia 1.6. In
+    Julia 1.0-1.5 use `skipchars(!predicate, io::IO; linecomment=nothing)` in
+    place of `skipuntil(predicate, io::IO; linecomment=nothing)`.
+
+See also: [`readuntil`](@ref)
 
 # Examples
 ```jldoctest
 julia> buf = IOBuffer("    text")
 IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=1, mark=-1)
 
-julia> skipchars(isspace, buf)
+julia> skipuntil(!isspace, buf)
 IOBuffer(data=UInt8[...], readable=true, writable=false, seekable=true, append=false, size=8, maxsize=Inf, ptr=5, mark=-1)
 
 julia> String(readavailable(buf))
 "text"
 ```
 """
-function skipchars(predicate, io::IO; linecomment=nothing)
+function skipuntil(predicate, io::IO; linecomment=nothing)
     while !eof(io)
         c = read(io, Char)
         if c === linecomment
-            readline(io)
-        elseif !predicate(c)
+            skipuntil(c -> c === '\n', io)
+            read(io, Char)
+        elseif predicate(c)
             skip(io, -ncodeunits(c))
             break
         end
     end
-    return io
+    io
 end
 
 """
