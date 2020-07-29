@@ -19,7 +19,7 @@ export @test, @test_throws, @test_broken, @test_skip,
 
 export @testset
 # Legacy approximate testing functions, yet to be included
-export @inferred
+export @inferred, @isinferred
 export detect_ambiguities, detect_unbound_args
 export GenericString, GenericSet, GenericDict, GenericArray, GenericOrder
 export TestSetException
@@ -1362,6 +1362,90 @@ macro inferred(allow, ex)
     _inferred(ex, __module__, allow)
 end
 function _inferred(ex, mod, allow = :(Union{}))
+    # @inferred performs almost the same checks as @code_warntype except for some
+    # corner cases in which the return value is a type and is not inferred
+    # correctly, e.g.
+    # f() = [DataType][1]
+    # g() = [Int64][1]
+    # @inferred throws an exception for f and g, but @code_warntype
+    # does not complain
+    inference = _inferred_impl(ex, mod)
+    quote
+        let
+            allow = $(esc(allow))
+            allow isa Type || throw(ArgumentError("@inferred requires a type as second argument"))
+            let (rettype, inftypes, result) = $inference
+                rettype <: allow || rettype == typesubtract(inftypes[1], allow) || error("return type $rettype does not match inferred return type $(inftypes[1])")
+                result
+            end
+        end
+    end
+end
+
+"""
+    @isinferred [AllowedType] f(x)
+
+Checks whether the call expression `f(x)` is type stable and returns a
+boolean value. `@isinferred` is similar to `@inferred`,
+but returns a boolean rather than throwing an exception.
+This macro is useful for unit tests (`@test @isinferred f(x)`).
+
+Optionally, `AllowedType` relaxes the test, by making it pass when either the type of `f(x)`
+matches the inferred type modulo `AllowedType`, or when the return type is a subtype of
+`AllowedType`. This is useful when testing type stability of functions returning a small
+union such as `Union{Nothing, T}` or `Union{Missing, T}`.
+
+`f(x)` can be any call expression.
+
+```jldoctest
+julia> using Base.Test
+
+julia> f(a,b,c) = b > 1 ? 1 : 1.0
+f (generic function with 1 method)
+
+julia> @code_warntype f(1,2,3)
+Variables:
+  #self#::#f
+  a::Int64
+  b::Int64
+  c::Int64
+
+Body:
+  begin
+      unless (Base.slt_int)(1, b::Int64)::Bool goto 3
+      return 1
+      3:
+      return 1.0
+  end::UNION{FLOAT64, INT64}
+
+julia> @isinferred f(1,2,3)
+false
+
+julia> @isinferred max(1,2)
+false
+```
+"""
+macro isinferred(ex)
+    _isinferred(ex, __module__)
+end
+macro isinferred(allow, ex)
+    _isinferred(ex, __module__, allow)
+end
+function _isinferred(ex, mod, allow = :(Union{}))
+    # @isinferred performs the same checks as @inferred
+    inference = _inferred_impl(ex, mod)
+    quote
+        let
+            allow = $(esc(allow))
+            allow isa Type || throw(ArgumentError("@inferred requires a type as second argument"))
+            let (rettype, inftypes, result) = $inference
+                rettype <: allow || rettype == typesubtract(inftypes[1], allow)
+            end
+        end
+    end
+end
+
+function _inferred_impl(ex, __module__)
     if Meta.isexpr(ex, :ref)
         ex = Expr(:call, :getindex, ex.args...)
     end
@@ -1374,8 +1458,6 @@ function _inferred(ex, mod, allow = :(Union{}))
     end
     Base.remove_linenums!(quote
         let
-            allow = $(esc(allow))
-            allow isa Type || throw(ArgumentError("@inferred requires a type as second argument"))
             $(if any(a->(Meta.isexpr(a, :kw) || Meta.isexpr(a, :parameters)), ex.args)
                 # Has keywords
                 args = gensym()
@@ -1394,8 +1476,7 @@ function _inferred(ex, mod, allow = :(Union{}))
             end)
             @assert length(inftypes) == 1
             rettype = result isa Type ? Type{result} : typeof(result)
-            rettype <: allow || rettype == typesubtract(inftypes[1], allow) || error("return type $rettype does not match inferred return type $(inftypes[1])")
-            result
+            rettype, inftypes, result
         end
     end)
 end

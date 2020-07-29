@@ -135,6 +135,11 @@ Standard library changes
 * Change `uuid1` and `uuid4` to use `Random.RandomDevice()` as default random number generator ([#35872]).
 * Added `parse(::Type{UUID}, ::AbstractString)` method
 
+#### Test
+
+* The new `@isinferred` macro does the same as `@inferred` but returns a boolean
+  rather than throwing an exception.
+
 Deprecated or removed
 ---------------------
 
