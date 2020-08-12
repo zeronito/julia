@@ -297,8 +297,14 @@ function summarize(io::IO, m::Module, binding)
 end
 
 function summarize(io::IO, @nospecialize(T), binding)
-    T = typeof(T)
-    println(io, "`", binding, "` is of type `", T, "`.\n")
+    println(io, "`", binding, "` is of type `", typeof(T), "`.\n")
+    if isa(T, UnionAll)
+        while isa(T, UnionAll)
+            T = T.body
+        end
+    else
+        T = typeof(T)
+    end
     summarize(io, T, binding)
 end
 
