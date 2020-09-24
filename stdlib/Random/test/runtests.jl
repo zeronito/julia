@@ -801,3 +801,30 @@ end
 @testset "RNGs broadcast as scalars: T" for T in (MersenneTwister, RandomDevice)
     @test length.(rand.(T(), 1:3)) == 1:3
 end
+
+const BASE_TEST_PATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
+isdefined(Main, :OffsetArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "OffsetArrays.jl"))
+
+@testset "OffsetArrays" begin
+    # axes as tuple
+    @test axes(rand(Bool, (Base.OneTo(3), Base.OneTo(3)))) === (Base.OneTo(3), Base.OneTo(3))
+    @test axes(rand(Bool, (Base.OneTo(3), 3))) === (Base.OneTo(3), Base.OneTo(3))
+    @test axes(rand(Bool, (0:2, 0:2))) == (0:2, 0:2)
+
+    # 1D axes
+    @test axes(rand(Bool, Base.OneTo(3))) === (Base.OneTo(3), )
+    @test axes(rand(Bool, 3)) === (Base.OneTo(3), )
+    @test axes(rand(Bool, 0:2)) == (0:2, )
+
+    # axes splatted
+    @test axes(rand(Bool, Base.OneTo(3), Base.OneTo(3))) === (Base.OneTo(3), Base.OneTo(3))
+    @test axes(rand(Bool, Base.OneTo(3), 3)) === (Base.OneTo(3), Base.OneTo(3))
+    @test axes(rand(Bool, 0:2, 0:2)) == (0:2, 0:2)
+
+    # edge cases
+    @test rand(3) isa Array{Float64, 1}
+    @test rand(1:3) isa Integer
+    @test rand(1:3, 1:4) isa OffsetArrays.OffsetArray
+    @test axes(rand(1:3, 1:4)) === (Base.IdentityUnitRange(1:4), )
+    @test axes(rand(1:3, 10)) === (Base.OneTo(10),)
+end
