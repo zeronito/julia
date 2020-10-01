@@ -79,6 +79,8 @@ Base.BroadcastStyle
 Base.Broadcast.AbstractArrayStyle
 Base.Broadcast.ArrayStyle
 Base.Broadcast.DefaultArrayStyle
+Base.Experimental.ReservedStyle
+Base.Experimental.ReservedCollection
 Base.Broadcast.broadcastable
 Base.Broadcast.combine_axes
 Base.Broadcast.combine_styles

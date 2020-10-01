@@ -680,7 +680,6 @@ broadcastable(::Type{T}) where {T} = Ref{Type{T}}(T)
 broadcastable(x::Union{AbstractArray,Number,Ref,Tuple,Broadcasted}) = x
 # Default to collecting iterables — which will error for non-iterables
 broadcastable(x) = collect(x)
-broadcastable(::Union{AbstractDict, NamedTuple}) = throw(ArgumentError("broadcasting over dictionaries and `NamedTuple`s is reserved"))
 
 ## Computation of inferred result type, for empty and concretely inferred cases only
 _broadcast_getindex_eltype(bc::Broadcasted) = Base._return_type(bc.f, eltypes(bc.args))
@@ -1263,5 +1262,34 @@ end
     broadcasted(combine_styles(arg1′, arg2′, args′...), f, arg1′, arg2′, args′...)
 end
 @inline broadcasted(::S, f, args...) where S<:BroadcastStyle = Broadcasted{S}(f, args)
+
+
+## Reserved broadcasting
+
+struct ReservedStyle <: BroadcastStyle end
+
+BroadcastStyle(s::ReservedStyle, ::BroadcastStyle) = s
+BroadcastStyle(s::ReservedStyle, ::Unknown) = s
+instantiate(bc::Broadcasted{ReservedStyle}) = bc
+
+_reserved_style_error() =
+    throw(ArgumentError("broadcasting over dictionaries and `NamedTuple`s is reserved"))
+
+copy(::Broadcasted{ReservedStyle}) = _reserved_style_error()
+materialize!(::ReservedStyle, _, ::Broadcasted{ReservedStyle}) = _reserved_style_error()
+
+struct ReservedCollection{T}
+    value::T
+end
+
+Base.get(r::ReservedCollection) = r.value
+axes(::ReservedCollection) = _reserved_style_error()
+Base.ndims(::Type{<:ReservedCollection}) = _reserved_style_error()
+
+broadcastable(x::Union{AbstractDict,NamedTuple}) = ReservedCollection(x)
+BroadcastStyle(::Type{<:ReservedCollection}) = ReservedStyle()
+BroadcastStyle(::Type{<:Union{AbstractDict,NamedTuple}}) = ReservedStyle()
+# `BroadcastStyle` for `AbstractDict` and `NamedTuple` are necessary
+# for case when they are used as the destination.
 
 end # module
