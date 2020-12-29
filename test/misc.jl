@@ -518,6 +518,25 @@ let buf = IOBuffer()
     @test Base.prompt(IOBuffer("blah\n"), buf, "baz", default="foobar") == "blah"
 end
 
+# stdin is unavailable on the workers. Run test on master.
+remotecall_fetch(1) do
+    let buf = IOBuffer()
+        original_stdin = stdin
+        (rd, wr) = redirect_stdin()
+        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foobar"
+        @test String(take!(buf)) == "baz [foobar] timeout 1 second: timed out\n"
+        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 2) == "foobar"
+        @test String(take!(buf)) == "baz [foobar] timeout 2 seconds: timed out\n"
+        write(wr, "foo\n")
+        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foo"
+        @test String(take!(buf)) == "baz [foobar] timeout 1 second: "
+        write(wr, "\n")
+        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foobar"
+        @test String(take!(buf)) == "baz [foobar] timeout 1 second: "
+        redirect_stdin(original_stdin)
+    end
+end
+
 # these tests are not in a test block so that they will compile separately
 @static if Sys.iswindows()
     SetLastError(code) = ccall(:SetLastError, stdcall, Cvoid, (UInt32,), code)
