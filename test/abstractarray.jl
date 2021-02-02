@@ -1269,3 +1269,11 @@ Base.pushfirst!(tpa::TestPushArray{T}, a::T) where T = pushfirst!(tpa.data, a)
     pushfirst!(tpa, 6, 5, 4, 3, 2)
     @test tpa.data == reverse(collect(1:6))
 end
+
+@testset "issue #27138" begin
+    @test convert(AbstractVector{Float64},1:10) === 1.0:1.0:10.0
+    @test AbstractVector{Float64}(1:10) === 1.0:1.0:10.0
+    @test AbstractVector(1:10) === 1:10
+    @inferred AbstractVector(1:10)
+    @inferred AbstractVector{Float64}(1:10)
+end
