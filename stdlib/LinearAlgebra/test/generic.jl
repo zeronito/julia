@@ -209,6 +209,159 @@ end
 @test norm([2.4e-322, 4.4e-323], 3) ≈ 2.4e-322
 @test_throws ArgumentError opnorm(Matrix{Float64}(undef,5,5),5)
 
+struct LinearOperator{T}
+    A::T
+end
+Base.eltype(M::LinearOperator) = eltype(M.A)
+Base.size(M::LinearOperator) = size(M.A)
+Base.:*(M::LinearOperator, X) = M.A * X
+Base.:\(M::LinearOperator, X) = M.A \ X
+Base.adjoint(M::LinearOperator) = LinearOperator(adjoint(M.A))
+
+@testset "estimate of matrix (operator) p-norm" begin
+    @testset "opnormest1(A), T=$T, size=($m,$n)" for T in (Float64, ComplexF64), m in (1, 10, 100), n in (1, 10, 100), TOp in (Matrix, LinearOperator)
+        A = randn(T, m, n)
+        OpA = TOp(A)
+        @inferred LinearAlgebra.opnormest1(OpA)
+        # estimates are bounded by opnorm
+        ests = [LinearAlgebra.opnormest1(OpA) for _ in 1:100]
+        nrm = opnorm(A, 1)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+
+        if T <: Real
+            # estimate is exact for positive matrix
+            Apos = abs.(randn(T, m, n))
+            @test LinearAlgebra.opnormest1(TOp(Apos)) ≈ opnorm(Apos, 1)
+
+            # estimate is exact for matrix with entries in {-1, 1}
+            Asign = rand((-1, 1), m, n)
+            @test LinearAlgebra.opnormest1(TOp(Asign)) ≈ opnorm(Asign, 1)
+        end
+
+        # check vectors
+        @test length(LinearAlgebra.opnormest1(OpA, Val(true))) == 2
+        @test length(LinearAlgebra.opnormest1(OpA, Val(false), Val(true))) == 2
+        @test length(LinearAlgebra.opnormest1(OpA, Val(true), Val(true))) == 3
+        est, v, w = LinearAlgebra.opnormest1(OpA, Val(true), Val(true))
+        @test w ≈ A * v
+        @test norm(w, 1) ≈ est * norm(v, 1)
+    end
+
+    @testset "opnormest2(A), T=$T, size=($m,$n)" for T in (Float64, ComplexF64), m in (1, 10, 100), n in (1, 10, 100), TOp in (Matrix, LinearOperator)
+        A = randn(T, m, n)
+        OpA = TOp(A)
+        @inferred LinearAlgebra.opnormest2(OpA)
+        # estimates are bounded by opnorm
+        ests = [LinearAlgebra.opnormest2(OpA) for _ in 1:100]
+        nrm = opnorm(A, 2)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+
+        # check vectors satisfy constraints
+        @test length(LinearAlgebra.opnormest2(OpA, Val(true))) == 2
+        @test length(LinearAlgebra.opnormest2(OpA, Val(false), Val(true))) == 2
+        @test length(LinearAlgebra.opnormest2(OpA, Val(true), Val(true))) == 3
+        est, v, w = LinearAlgebra.opnormest2(OpA, Val(true), Val(true))
+        @test w ≈ A * v
+        @test norm(w, 2) ≈ est * norm(v, 2)
+
+        A2 = randn(T, m, n)
+        U, S, V = svd(A2)
+        if minimum(size(A2)) > 1
+            S[1] = S[2] * 5 # convergence is faster when highest singular value is well-separated
+            A2 = U * Diagonal(S) * V'
+        end
+        OpA2 = TOp(A2)
+        est2, v2, w2 = LinearAlgebra.opnormest2(OpA2, Val(true), Val(true))
+        # est2 is leading singular value
+        @test est2 ≈ S[1]
+        # v2 and w2/est2 are leading singular vectors
+        @test abs(dot(w2, U[:,1])) ≈ est2
+        @test abs(dot(v2, V[:,1])) ≈ 1
+
+        if TOp <: Matrix
+            # A orthogonal to ones(n) = 0, so power iteration needs a new start
+            if (m, n) == (1, 10)
+                Asign = reshape([1, -1, 1, 1, -1, -1, 1, 1, -1, -1], m, n)
+                @test LinearAlgebra.opnormest2(TOp(Asign); tol=eps(real(T)), maxiter=1000) ≈ opnorm(Asign, 2)
+            end
+
+            Azero = zeros(T, m, n)
+            est3, v3, w3 = LinearAlgebra.opnormest2(Azero, Val(true), Val(true))
+            @test iszero(est3)
+            @test v3 ≈ T[1; zeros(n-1)]
+            @test iszero(w3)
+        end
+    end
+
+    @testset "opnormest(A, $p), T=$T, size=($m,$n)" for p in (1, 2, Inf), T in (Float64, ComplexF64), m in (1, 10, 100), n in (1, 10, 100), TOp in (Matrix, LinearOperator)
+        A = randn(T, m, n)
+        OpA = TOp(A)
+        @inferred opnormest(OpA, p)
+        # estimates are bounded by opnorm
+        ests = [opnormest(OpA, p) for _ in 1:100]
+        nrm = opnorm(A, p)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+
+        if T <: Real && p in (1, Inf)
+            # estimate is exact for positive matrix
+            Apos = abs.(randn(T, m, n))
+            @test opnormest(TOp(Apos), p) ≈ opnorm(Apos, p)
+
+            # estimate is exact for matrix with entries in {-1, 1}
+            Asign = rand((-1, 1), m, n)
+            @test opnormest(TOp(Asign), p) ≈ opnorm(Asign, p)
+        end
+    end
+
+    @testset "opnormest(A) default" begin
+        A = randn(10, 10)
+        @test opnormest(A) == opnormest(A, 2)
+        @test_throws ArgumentError opnormest(A, 3)
+    end
+
+    @testset "opnormest(::typeof($f), A, $p), n=$n" for f in (pinv, inv), p in (1, 2, Inf), n in (10, 30)
+        m = f === pinv ? 20 : n
+        A = randn(m, n)
+        @inferred opnormest(f, A, p)
+        # estimates are bounded by opnorm
+        ests = [opnormest(f, A, p) for _ in 1:100]
+        nrm = opnorm(f(A), p)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+
+        # estimate is exact for positive matrix
+        if m == n && p in (1, Inf)
+            Apos = f(abs.(randn(m, n)))
+            @test opnormest(f, Apos, p) ≈ opnorm(f(Apos), p)
+        end
+
+        if f === inv
+            @test_throws DimensionMismatch opnormest(f, randn(10,11), p)
+        end
+    end
+
+    @testset "opnormest(::typeof(prod), A, $p)" for p in (1, 2, Inf)
+        As = [randn(10, 2), randn(2, 10), randn(10, 11)]
+        @inferred opnormest(prod, As, p)
+
+        # estimates are bounded by opnorm
+        ests = [opnormest(prod, As, p) for _ in 1:100]
+        nrm = opnorm(prod(As), p)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+
+        if p in (1, Inf)
+            # estimate is exact for positive matrix
+            Apos = abs.(randn(10, 10))
+            sqrtApos = sqrt(Apos)
+            @test opnormest(prod, [sqrtApos, sqrtApos], p) ≈ opnorm(Apos, p)
+
+            # estimate is exact for matrix with entries in {-1, 1}
+            Asign = rand((-1, 1), 10, 10)
+            sqrtAsign = sqrt(Asign)
+            @test opnormest(prod, [sqrtAsign, sqrtAsign], p) ≈ opnorm(Asign, p)
+        end
+    end
+end
+
 @testset "generic norm for arrays of arrays" begin
     x = Vector{Int}[[1,2], [3,4]]
     @test @inferred(norm(x)) ≈ sqrt(30)

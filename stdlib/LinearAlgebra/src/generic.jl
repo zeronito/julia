@@ -833,6 +833,356 @@ opnorm(v::AdjointAbsVec, q::Real) = q == Inf ? norm(conj(v.parent), 1) : norm(co
 opnorm(v::AdjointAbsVec) = norm(conj(v.parent))
 opnorm(v::TransposeAbsVec) = norm(v.parent)
 
+_isparallel(x, y) = abs(dot(x, y)) == length(x)
+
+"""
+    opnormest2(A; tol=1e-6, maxiter=100) -> est
+
+Estimate the operator 2-norm [`opnorm(A, 2)`](@ref) of the matrix or linear operator `A`
+using power iteration.
+
+The estimate is a lower bound on the 2-norm and can be much more efficient than `opnorm` for
+large and sparse matrices. The power iteration terminates when the estimate converges,
+within the relative tolerance `tol`, or after `maxiter` iterations. Note that the algorithm
+uses random numbers, so the result may change between evaluations.
+
+`A` can be of any type `Op`, representing a matrix, that implements the following methods:
+- `size(A::Op)`
+- `eltype(A::Op)`
+- `*(A::Op, B::AbstractMatrix)`
+- `adjoint(A::Op)`
+
+    opnormest2(A, retv::Val{true}; kwargs...) -> (est, v)
+    opnormest2(A, retv::Val{false}, retw::Val{true}; kwargs...) -> (est, w)
+    opnormest2(A, retv::Val{true}, retw::Val{true}; kwargs...) -> (est, v, w)
+
+Along with the estimate of the operator 2-norm, return a vector `v` and/or a vector `w` that
+correspond to the estimate, such that ``w = A v`` and
+``\\|w\\|_2 = \\mathrm{est} \\|v\\|_2``, where ``\\mathrm{est}`` is the estimate of the
+matrix 2-norm of `A`, and ``\\|⋅\\|_2`` is the Frobenius 2-[`norm`](@ref).
+"""
+function opnormest2(
+    A,
+    ::Val{retv} = Val(false),
+    ::Val{retw} = Val(false);
+    tol = 1e-6,
+    maxiter = 100,
+) where {retv,retw}
+    T = eltype(A)
+    m, n = size(A)
+    A′ = A'
+    c = float(T)(inv(sqrt(n)))
+    v = fill(c, n)
+    w = A * v
+    est = norm(w)
+    est_old = oftype(est, -Inf)
+    iter = 0
+    while iter < maxiter && est-est_old > tol*est
+        iter += 1
+        # if est is zero, then 1) v is orthogonal to singular vectors or 2) A is zero
+        # if (1), randomly sampling gives probability 0 of being orthogonal to singular vector
+        # if (2), z will be zero, and termination occurs
+        iszero(est) && rand!(w)
+        z = A′ * w
+        znorm = norm(z)
+        # stop if new v will equal old v
+        znorm ≤ real(dot(z, v)) && break
+        iszero(znorm) || rmul!(z, inv(znorm))
+        v = z
+        w = A * v
+        est, est_old = norm(w), est
+    end
+    ret = est
+    if retv
+        if iszero(est) # zero matrix, give same result as svd
+            v[1] = 1
+            for j in 2:n
+                v[j] = 0
+            end
+        end
+        ret = (ret, v)
+    end
+    if retw
+        iszero(est) && fill!(w, false) # zero matrix, reset to zero in case was randomized
+        ret = (ret..., w)
+    end
+    return ret
+end
+
+function _any_cols_are_parallel(X, xrange, Y, yrange)
+    n = size(X, 1)
+    for i in xrange
+        x = view(X,1:n,i)
+        for j in yrange
+            y = view(Y,1:n,j)
+            _isparallel(x, y) && return true
+        end
+    end
+    return false
+end
+
+function _each_col_has_parallel_col(X, Y)
+    for x in eachcol(X)
+        any(y -> _isparallel(x, y), eachcol(Y)) || return false
+    end
+    return true
+end
+
+"""
+    opnormest1(A; t::Integer = 2) -> est
+
+Estimate the operator 1-norm [`opnorm(A, 1)`](@ref) of the matrix or linear operator `A`
+using a block algorithm.
+
+The estimate is a based on Algorithm 2.4 of [^HighamTisseur], with a generalization to non-
+square operators `A` by implicitly padding `A` with zeros to be square. It produces a lower
+bound on the 1-norm and can be much more efficient than `opnorm` for large and sparse
+matrices. Note that the algorithm uses random numbers, so the result may change between
+evaluations.
+
+[^HighamTisseur]:
+    Nicholas J. Higham and Françoise Tisseur,
+    "A block algorithm for matrix 1-norm estimation, with an application to 1-norm pseudospectra",
+    SIAM Journal on Matrix Analysis and Applications, 21(4), 2000, pp. 1185-1201.
+    [doi:10.1137/S0895479899356080](https://doi.org/10.1137/S0895479899356080)
+
+`A` can be of any type `Op`, representing a matrix, that implements the following methods:
+- `size(A::Op)`
+- `eltype(A::Op)`
+- `*(A::Op, B::AbstractMatrix)`
+- `adjoint(A::Op)`
+
+`t` is a parameter that sets the number of columns of a matrix that is multiplied by `A` and
+must not exceed the number of rows or columns of `A`.
+
+    opnormest1(A, retv::Val{true}; t::Integer = 2) -> (est, v)
+    opnormest1(A, retv::Val{false}, retw::Val{true}; t::Integer = 2) -> (est, w)
+    opnormest1(A, retv::Val{true}, retw::Val{true}; t::Integer = 2) -> (est, v, w)
+
+Along with the estimate of the operator 1-norm, return a vector `v` and/or a vector `w` that
+correspond to the estimate, such that ``w = A v`` and
+``\\|w\\|_1 = \\mathrm{est} \\|v\\|_1``, where ``\\mathrm{est}`` is the estimate of the
+matrix 1-norm of `A`, and ``\\|⋅\\|_1`` is the Frobenius 1-[`norm`](@ref).
+"""
+function opnormest1(
+    A,
+    ::Val{retv}=Val(false),
+    ::Val{retw}=Val(false);
+    t::Integer=min(2,minimum(size(A))),
+) where {retv,retw}
+    T = eltype(A)
+    maxiter = 5
+    # Check the input
+    m, n = size(A)
+    if t <= 0
+        throw(ArgumentError("number of blocks must be a positive integer"))
+    end
+    if t > min(m, n)
+        throw(ArgumentError("number of blocks must not be greater than $(min(m, n))"))
+    end
+    ind = ones(Int64, n)
+    ind_hist = Set{Int64}()
+
+    Ti = typeof(float(zero(T)))
+
+    S_old = zeros(Ti, m, t)
+    S = Matrix{Ti}(undef, m, t)
+    h = Vector{real(Base.promote_type(Ti, T))}(undef, n)
+
+    # Generate the block matrix
+    X = Matrix{real(Ti)}(undef, n, t)
+    X[1:n,1] .= 1
+    for j = 2:t
+        while true
+            rand!(view(X,1:n,j), (-1, 1))
+            if !_any_cols_are_parallel(X, j, X, 1:j-1)
+                break
+            end
+        end
+    end
+    rmul!(X, inv(max(m, n)))
+
+    if retw
+        w = Vector{Ti}(undef, m)
+    end
+
+    iter = 0
+    ind_best = 1
+    est = est_old = zero(real(eltype(X)))
+    while true
+        iter += 1
+        Y = A * X
+        est, est_ind = findmax(i -> norm1(view(Y,1:m,i)), 1:t)
+        if est > est_old || iter == 2
+            ind_best = ind[est_ind]
+            retw && copyto!(w, view(Y, 1:m, est_ind))
+        end
+        # (1)
+        if iter >= 2 && est <= est_old
+            est = est_old
+            break
+        end
+        est_old = est
+        S, S_old = S_old, S
+        iter > maxiter && break
+        broadcast!(S, Y) do Yij
+            Sij = sign(Yij)
+            return ifelse(iszero(Sij), one(Sij), Sij)
+        end
+        if T <: Real
+            # (2)
+            # Complex vectors are much less likely to be parallel, so the check is skipped
+            iter >= 2 && _each_col_has_parallel_col(S, S_old) && break
+            # Randomly permute any cols of S that are parallel to cols of S or S_old
+            if t > 1 # if t == 1 and we've reached this loop, then never runs
+                for j = 1:t
+                    while (j > 1 && _any_cols_are_parallel(S, j, S, 1:(j - 1))) ||
+                        (iter >= 2 && _any_cols_are_parallel(S, j, S_old, 1:t))
+                        rand!(view(S, 1:m, j), (-1, 1))
+                    end
+                end
+            end
+        end
+        # (3)
+        # Use the conjugate transpose
+        Z = A' * S
+        h_max = zero(eltype(h))
+        for i = 1:n
+            h[i] = hi = normInf(view(Z,i,1:t))
+            if hi > h_max
+                h_max = hi
+            end
+        end
+        # (4)
+        if iter >= 2 && h_max == h[ind_best]
+            break
+        end
+        sortperm!(ind, h; rev=true)
+        permute!(h, ind)
+        if t > 1
+            # (5)
+            issubset(view(ind,1:t), ind_hist) && break
+            # replace ind[1:t] by first t indices in ind not in ind_hist
+            j = 1
+            for i in 1:n
+                indi = ind[i]
+                if indi ∉ ind_hist
+                    ind[j] = indi
+                    j += 1
+                end
+                j > t && break
+            end
+        end
+        for j = 1:t
+            fill!(view(X,1:n,j), 0)
+            X[ind[j],j] = 1
+        end
+        union!(ind_hist, view(ind,1:t))
+    end
+    ret = est
+    # (6)
+    if retv
+        v = zeros(Ti, n)
+        v[ind_best] = 1
+        ret = (ret, v)
+    end
+    if retw
+        ret = (ret..., w)
+    end
+    return ret
+end
+
+opnormestInf(A) = opnormest1(A')
+
+"""
+    opnormest(A, p::Real=2) -> est
+
+Estimate the operator p-norm [`opnorm(A, p)`](@ref) of the matrix or linear operator `A`.
+
+The estimate produces produces a lower bound on the p-norm and can be much more efficient
+than `opnorm` for large and sparse matrices.
+
+`A` can be of any type `Op`, representing a matrix, that implements the following methods:
+- `size(A::Op)`
+- `eltype(A::Op)`
+- `*(A::Op, B::AbstractMatrix)`
+- `adjoint(A::Op)`
+
+    opnormest(f, A, p::Real)
+
+Estimate the operator p-norm [`opnorm(inv(A), p)`](@ref) of a matrix or linear operator
+`A` without computing `f(A)`.
+
+    opnormest(::typeof(inv), A, p::Real)
+    opnormest(::typeof(pinv), A, p::Real)
+
+Estimate the operator p-norm of `inv(A)` or `pinv(A)`. If `A` is an `AbstractMatrix`, it
+will be more efficient to pass its factorization to this function.
+
+`A` can be of any type `Op`, representing a matrix, that implements the following methods:
+- `size(A::Op)`
+- `eltype(A::Op)`
+- `\\(A::Op, B::AbstractMatrix)`
+- `adjoint(A::Op)`
+
+    opnormest(::typeof(prod), As, p::Real)
+
+Estimate the operator p-norm of the product of the matrices or linear operators `As` without
+forming the product `prod(As)`.
+"""
+opnormest
+
+function opnormest(A, p::Real=2)
+    if p == 2
+        return opnormest2(A)
+    elseif p == 1
+        return opnormest1(A)
+    elseif p == Inf
+        return opnormestInf(A)
+    else
+        throw(ArgumentError("invalid p-norm p=$p. Valid: 1, 2, Inf"))
+    end
+end
+
+# Linear operator representing inverse of a matrix
+struct PInvLinearOperator{T}
+    A::T
+end
+Base.eltype(M::PInvLinearOperator) = eltype(M.A)
+Base.size(M::PInvLinearOperator) = reverse(size(M.A))
+Base.:*(M::PInvLinearOperator, X) = M.A \ X
+Base.adjoint(M::PInvLinearOperator) = PInvLinearOperator(adjoint(M.A))
+
+function opnormest(::typeof(inv), A, p::Real)
+    checksquare(A)
+    return opnormest(PInvLinearOperator(A), p)
+end
+
+function opnormest(::typeof(pinv), A, p::Real)
+    return opnormest(PInvLinearOperator(A), p)
+end
+
+# Linear operator representing product of matrices A₁ * A₂ * …
+struct ProdLinearOperator{T}
+    As::T
+end
+Base.eltype(M::ProdLinearOperator) = Base.promote_eltype(M.As...)
+Base.size(M::ProdLinearOperator) = (size(first(M.As))[1], size(last(M.As))[2])
+function Base.:*(M::ProdLinearOperator, X)
+    for A in reverse(M.As)
+        X = A * X
+    end
+    return X
+end
+function Base.adjoint(M::ProdLinearOperator)
+    Ast = map(adjoint, reverse(M.As))
+    return ProdLinearOperator(Ast)
+end
+
+function opnormest(::typeof(prod), As, p::Real)
+    return opnormest(ProdLinearOperator(As), p)
+end
+
 norm(v::Union{TransposeAbsVec,AdjointAbsVec}, p::Real) = norm(v.parent, p)
 
 """

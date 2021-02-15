@@ -2031,13 +2031,26 @@ end
     Ari = ceil.(Int64, 100*Ar)
     if Base.USE_GPL_LIBS
         # NOTE: opnormestinv is probabilistic, so requires a fixed seed (set above in Random.seed!(1234))
-        @test SparseArrays.opnormestinv(Ac,3) ≈ opnorm(inv(Array(Ac)),1) atol=1e-4
-        @test SparseArrays.opnormestinv(Aci,3) ≈ opnorm(inv(Array(Aci)),1) atol=1e-4
-        @test SparseArrays.opnormestinv(Ar) ≈ opnorm(inv(Array(Ar)),1) atol=1e-4
-        @test_throws ArgumentError SparseArrays.opnormestinv(Ac,0)
-        @test_throws ArgumentError SparseArrays.opnormestinv(Ac,21)
+        @test_deprecated SparseArrays.opnormestinv(Ac,3)
+        @test_deprecated SparseArrays.opnormestinv(Aci,3)
+        @test_deprecated SparseArrays.opnormestinv(Ar)
+        @test_deprecated SparseArrays.opnormestinv(Ac,0)
+        @test_deprecated SparseArrays.opnormestinv(Ac,21)
     end
-    @test_throws DimensionMismatch SparseArrays.opnormestinv(sprand(3,5,.9))
+    @test_deprecated SparseArrays.opnormestinv(sprand(3,5,.9))
+end
+
+Base.USE_GPL_LIBS && @testset "sparse matrix opnormest(inv, A, $p)" for p in (1,2,Inf)
+    Ac = sprandn(20,20,.5) + im* sprandn(20,20,.5)
+    Aci = ceil.(Int64, 100*sprand(20,20,.5)) + im*ceil.(Int64, sprand(20,20,.5))
+    Ar = sprandn(20,20,.5)
+
+    # estimates are bounded by opnorm
+    for A in (Ac, Aci, Ar)
+        ests = [opnormest(inv, A, p) for _ in 1:100]
+        nrm = opnorm(inv(Array(A)), p)
+        @test all(est -> est ≈ nrm || est < nrm, ests)
+    end
 end
 
 @testset "issue #13008" begin
