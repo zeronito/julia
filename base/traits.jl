@@ -1,17 +1,46 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 ## numeric/object traits
-# trait for objects that have an ordering
+
+"""
+    OrderStyle(T::Type) -> OrderStyle
+
+Given a type `T`, return one of the following values:
+- [`Ordered()`](@ref) if type `T` guarantees that a call `isless(::T, ::T)`
+will return `true` or `false`.
+- [`Unordered()`](@ref) otherwise (this is the default).
+
+Types supporting [`isless`](@ref) are recommended to return
+[`Ordered()`](@ref) to enable optimizations.
+"""
 abstract type OrderStyle end
+
+"""
+    Ordered()
+
+Indicate that a type `T` guarantees that a call `isless(::T, ::T)` will return `true` or `false`.
+It is recommended that custom types defining `isless` implement this
+trait as this information can be used to enable optimizations.
+"""
 struct Ordered <: OrderStyle end
+
+"""
+    Unordered()
+
+A default `OrderStyle` for any type `T` indicating that optimizations
+cannot rely on the fact that it is guaranteed that a call `isless(::T, ::T)`
+will return `true` or `false`.
+"""
 struct Unordered <: OrderStyle end
 
 OrderStyle(instance) = OrderStyle(typeof(instance))
-OrderStyle(::Type{<:Real}) = Ordered()
-OrderStyle(::Type{<:AbstractString}) = Ordered()
-OrderStyle(::Type{Symbol}) = Ordered()
-OrderStyle(::Type{<:Any}) = Unordered()
 OrderStyle(::Type{Union{}}) = Ordered()
+OrderStyle(::Type{<:Union{Missing,Real}}) = Ordered()
+OrderStyle(::Type{<:Union{Missing,AbstractString}}) = Ordered()
+OrderStyle(::Type{<:Union{Missing,AbstractChar}}) = Ordered()
+OrderStyle(::Type{<:Union{Missing,Symbol}}) = Ordered()
+OrderStyle(::Type{<:Missing}) = Ordered()
+OrderStyle(::Type{<:Any}) = Unordered()
 
 # trait for objects that support arithmetic
 abstract type ArithmeticStyle end
