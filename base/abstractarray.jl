@@ -2295,6 +2295,9 @@ function map!(f::F, dest::AbstractArray, A::AbstractArray) where F
     return dest
 end
 
+# same dest as source
+map!(f::F, A::AbstractArray) where F = map!(f, A, A)
+
 # map on collections
 map(f, A::AbstractArray) = collect_similar(A, Generator(f,A))
 
@@ -2364,6 +2367,7 @@ end
 
 Like [`map`](@ref), but stores the result in `destination` rather than a new
 collection. `destination` must be at least as large as the first collection.
+If the destination is the source, the array may be specified just once.
 
 # Examples
 ```jldoctest
@@ -2376,6 +2380,15 @@ julia> a
  2.0
  4.0
  6.0
+
+julia> map!(x -> x / 2, a);
+
+julia> a
+3-element Array{Float64,1}:
+ 1.0
+ 2.0
+ 3.0
+
 ```
 """
 function map!(f::F, dest::AbstractArray, As::AbstractArray...) where {F}
