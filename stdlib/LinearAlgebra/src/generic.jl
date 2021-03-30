@@ -478,7 +478,7 @@ function generic_norm1(x)
     (v, s) = iterate(x)::Tuple
     av = float(norm(v))
     T = typeof(av)
-    sum::promote_type(Float64, T) = av
+    sum = av*1.0 # promotes to at least Float64 with * 1.0
     while true
         y = iterate(x, s)
         y === nothing && break
@@ -495,11 +495,11 @@ norm_sqr(x::Union{T,Complex{T},Rational{T}}) where {T<:Integer} = abs2(float(x))
 
 function generic_norm2(x)
     maxabs = normInf(x)
-    (maxabs == 0 || isinf(maxabs)) && return maxabs
+    (iszero(maxabs) || isinf(maxabs)) && return maxabs
     (v, s) = iterate(x)::Tuple
     T = typeof(maxabs)
-    if isfinite(length(x)*maxabs*maxabs) && maxabs*maxabs != 0 # Scaling not necessary
-        sum::promote_type(Float64, T) = norm_sqr(v)
+    if isfinite(length(x)*maxabs*maxabs) && !iszero(maxabs*maxabs) # Scaling not necessary
+        sum = norm_sqr(v)*1.0 # promotes to at least Float64 with * 1.0
         while true
             y = iterate(x, s)
             y === nothing && break
@@ -525,30 +525,32 @@ function generic_normp(x, p)
     (v, s) = iterate(x)::Tuple
     if p > 1 || p < -1 # might need to rescale to avoid overflow
         maxabs = p > 1 ? normInf(x) : normMinusInf(x)
-        (maxabs == 0 || isinf(maxabs)) && return maxabs
+        (iszero(maxabs) || isinf(maxabs)) && return maxabs
         T = typeof(maxabs)
+        maxabsd = maxabs*1.0 # promotes to at least Float64 with * 1.0
     else
         T = typeof(float(norm(v)))
+        maxabsd = oneunit(T)*1.0 # promotes to at least Float64 with * 1.0
     end
-    spp::promote_type(Float64, T) = p
-    if -1 <= p <= 1 || (isfinite(length(x)*maxabs^spp) && maxabs^spp != 0) # scaling not necessary
-        sum::promote_type(Float64, T) = norm(v)^spp
+    pinv = p isa Integer ? 1//p : 1.0*inv(p)
+    if -1 <= p <= 1 || (isfinite(length(x)*maxabsd^p) && !iszero(maxabsd^p)) # scaling not necessary
+        sum = (norm(v) * 1.0)^p # promotes to at least Float64 with * 1.0
         while true
             y = iterate(x, s)
             y === nothing && break
             (v, s) = y
-            sum += norm(v)^spp
+            sum += (norm(v) * 1.0)^p
         end
-        return convert(T, sum^inv(spp))
+        return convert(T, sum^pinv)
     else # rescaling
-        sum = (norm(v)/maxabs)^spp
+        sum = (norm(v)/maxabsd)^p
         while true
             y = iterate(x, s)
             y === nothing && break
             (v, s) = y
-            sum += (norm(v)/maxabs)^spp
+            sum += (norm(v)/maxabsd)^p
         end
-        return convert(T, maxabs*sum^inv(spp))
+        return convert(T, maxabsd*sum^pinv)
     end
 end
 
@@ -1654,12 +1656,12 @@ promote_leaf_eltypes(x::Union{AbstractArray,Tuple}) = mapreduce(promote_leaf_elt
 # Supports nested arrays; e.g., for `a = [[1,2, [3,4]], 5.0, [6im, [7.0, 8.0]]]`
 # `a ≈ a` is `true`.
 function isapprox(x::AbstractArray, y::AbstractArray;
-    atol::Real=0,
+    atol::Number=0,
     rtol::Real=Base.rtoldefault(promote_leaf_eltypes(x),promote_leaf_eltypes(y),atol),
     nans::Bool=false, norm::Function=norm)
     d = norm(x - y)
     if isfinite(d)
-        return d <= max(atol, rtol*max(norm(x), norm(y)))
+        return Base._isapprox_small(d, atol, rtol*max(norm(x), norm(y)))
     else
         # Fall back to a component-wise approximate comparison
         return all(ab -> isapprox(ab[1], ab[2]; rtol=rtol, atol=atol, nans=nans), zip(x, y))
