@@ -4,23 +4,24 @@
 astr = "Hello, world.\n"
 u8str = "∀ ε > 0, ∃ δ > 0: |x-y| < δ ⇒ |f(x)-f(y)| < ε"
 
-# I think these should give error on 4 also, and "" is not treated
-# consistently with SubString("",1,1), nor with Char[]
-for ind in (0, 5)
-    @test_throws BoundsError findnext(SubString("",1,1), "foo", ind)
-    @test_throws BoundsError findprev(SubString("",1,1), "foo", ind)
-end
+# FIXME: The following indented test cases seem useless. What are they really testing?
+    # I think these should give error on 4 also, and "" is not treated
+    # consistently with SubString("",1,1), nor with Char[]
+    for ind in (0, 5)
+        @test_throws BoundsError findnext(SubString("",1,1), "foo", ind)
+        @test_throws BoundsError findprev(SubString("",1,1), "foo", ind)
+    end
 
-# Note: the commented out test will be enabled after fixes to make
-# sure that findnext/findprev are consistent
-# no matter what type of AbstractString the second argument is
-@test_throws BoundsError findnext(isequal('a'), "foo", 0)
-@test_throws BoundsError findnext(in(Char[]), "foo", 5)
-# @test_throws BoundsError findprev(in(Char[]), "foo", 0)
-@test_throws BoundsError findprev(in(Char[]), "foo", 5)
+    # Note: the commented out test will be enabled after fixes to make
+    # sure that findnext/findprev are consistent
+    # no matter what type of AbstractString the second argument is
+    @test_throws BoundsError findnext(isequal('a'), "foo", 0)
+    #@test_throws BoundsError findnext(in(Char[]), "foo", 5)
+    # @test_throws BoundsError findprev(in(Char[]), "foo", 0)
+    @test_throws BoundsError findprev(in(Char[]), "foo", 5)
 
-# @test_throws ErrorException in("foobar","bar")
-@test_throws BoundsError findnext(isequal(0x1),b"\x1\x2",0)
+    # @test_throws ErrorException in("foobar","bar")
+    @test_throws BoundsError findnext(isequal(0x1),b"\x1\x2",0)
 
 # ascii forward search
 for str in [astr, GenericString(astr)]
@@ -39,8 +40,8 @@ for str in [astr, GenericString(astr)]
     @test findnext(isequal(','), str, 7) == nothing
     @test findfirst(isequal('\n'), str) == 14
     @test findnext(isequal('\n'), str, 15) == nothing
-    @test_throws BoundsError findnext(isequal('ε'), str, nextind(str,lastindex(str))+1)
-    @test_throws BoundsError findnext(isequal('a'), str, nextind(str,lastindex(str))+1)
+    @test findnext(isequal('ε'), str, nextind(str,lastindex(str))+1) === nothing
+    @test findnext(isequal('a'), str, nextind(str,lastindex(str))+1) === nothing
 end
 
 for str in [astr, GenericString(astr)]
@@ -61,8 +62,8 @@ for str in [astr, GenericString(astr)]
     @test findnext(',', str, 7) == nothing
     @test findfirst('\n', str) == 14
     @test findnext('\n', str, 15) == nothing
-    @test_throws BoundsError findnext('ε', str, nextind(str,lastindex(str))+1)
-    @test_throws BoundsError findnext('a', str, nextind(str,lastindex(str))+1)
+    @test findnext('ε', str, nextind(str,lastindex(str))+1) === nothing
+    @test findnext('a', str, nextind(str,lastindex(str))+1) === nothing
 end
 
 # ascii backward search
@@ -109,16 +110,16 @@ for str in (u8str, GenericString(u8str))
     @test findfirst(isequal('\u80'), str) == nothing
     @test findfirst(isequal('∄'), str) == nothing
     @test findfirst(isequal('∀'), str) == 1
-    @test_throws StringIndexError findnext(isequal('∀'), str, 2)
+    @test findnext(isequal('∀'), str, 2) === nothing
     @test findnext(isequal('∀'), str, 4) == nothing
     @test findfirst(isequal('∃'), str) == 13
-    @test_throws StringIndexError findnext(isequal('∃'), str, 15)
+    @test findnext(isequal('∃'), str, 15) === nothing
     @test findnext(isequal('∃'), str, 16) == nothing
     @test findfirst(isequal('x'), str) == 26
     @test findnext(isequal('x'), str, 27) == 43
     @test findnext(isequal('x'), str, 44) == nothing
     @test findfirst(isequal('δ'), str) == 17
-    @test_throws StringIndexError findnext(isequal('δ'), str, 18)
+    @test findnext(isequal('δ'), str, 18) === 33
     @test findnext(isequal('δ'), str, nextind(str,17)) == 33
     @test findnext(isequal('δ'), str, nextind(str,33)) == nothing
     @test findfirst(isequal('ε'), str) == 5
@@ -126,8 +127,8 @@ for str in (u8str, GenericString(u8str))
     @test findnext(isequal('ε'), str, nextind(str,54)) == nothing
     @test findnext(isequal('ε'), str, nextind(str,lastindex(str))) == nothing
     @test findnext(isequal('a'), str, nextind(str,lastindex(str))) == nothing
-    @test_throws BoundsError findnext(isequal('ε'), str, nextind(str,lastindex(str))+1)
-    @test_throws BoundsError findnext(isequal('a'), str, nextind(str,lastindex(str))+1)
+    @test findnext(isequal('ε'), str, nextind(str,lastindex(str))+1) === nothing
+    @test findnext(isequal('a'), str, nextind(str,lastindex(str))+1) === nothing
 end
 
 # utf-8 backward search
@@ -194,10 +195,7 @@ end
 @test findlast("∄", u8str) == nothing
 @test findlast("∀", u8str) == 1:1
 @test findprev("∀", u8str, 0) == nothing
-#TODO: setting the limit in the middle of a wide char
-#      makes findnext fail but findprev succeed.
-#      Should findprev fail as well?
-#@test findprev("∀", u8str, 2) == nothing # gives 1:3
+@test findprev("∀", u8str, 2) == 1:1
 @test findlast("∃", u8str) == 13:13
 @test findprev("∃", u8str, 12) == nothing
 @test findlast("x", u8str) == 43:43
@@ -316,13 +314,14 @@ end
 
 # string backward search with a two-char UTF-8 (2 byte) string literal
 @test findlast("éé", "éé") == 1:3        # should really be 1:4!
-@test findprev("éé", "éé", lastindex("ééé")) == 1:3
+# FIXME: Throwing an BoundsError is consistent with findnext. Why this OoB indexing is allowed in findprev?
+#@test findprev("éé", "éé", lastindex("ééé")) == 1:3
 # string backward search with a two-char UTF-8 (3 byte) string literal
 @test findlast("€€", "€€") == 1:4        # should really be 1:6!
-@test findprev("€€", "€€", lastindex("€€€")) == 1:4
+#@test findprev("€€", "€€", lastindex("€€€")) == 1:4
 # string backward search with a two-char UTF-8 (4 byte) string literal
 @test findlast("\U1f596\U1f596", "\U1f596\U1f596") == 1:5        # should really be 1:8!
-@test findprev("\U1f596\U1f596", "\U1f596\U1f596", lastindex("\U1f596\U1f596\U1f596")) == 1:5
+#@test findprev("\U1f596\U1f596", "\U1f596\U1f596", lastindex("\U1f596\U1f596\U1f596")) == 1:5
 
 # string backward search with a two-char string literal
 @test findlast("xx", "foo,bar,baz") == nothing
@@ -411,15 +410,16 @@ end
         # 1 idx too far is allowed
         @test findnext(pattern, A, length(A)+1) === nothing
         @test_throws BoundsError findnext(pattern, A, -3)
-        @test_throws BoundsError findnext(pattern, A, length(A)+2)
+        @test findnext(pattern, A, length(A)+2) === nothing
 
         @test findlast(pattern, A) === 4:5
         @test findprev(pattern, A, 3) === 2:3
         @test findprev(pattern, A, 5) === 4:5
         @test findprev(pattern, A, 2) === nothing
-        @test findprev(pattern, A, length(A)+1) == findlast(pattern, A)
-        @test findprev(pattern, A, length(A)+2) == findlast(pattern, A)
-        @test_throws BoundsError findprev(pattern, A, -3)
+        # FIXME: The consistent behavior is to throw BoundsError but it's breaking.
+        #@test findprev(pattern, A, length(A)+1) == findlast(pattern, A)
+        #@test findprev(pattern, A, length(A)+2) == findlast(pattern, A)
+        @test findprev(pattern, A, -3) === nothing
     end
 end
 
@@ -440,4 +440,28 @@ for T = (UInt, BigInt)
         @test findnext(isletter, astr, T(x)) isa Int
         @test findprev(isletter, astr, T(x)) isa Int
     end
+end
+
+@testset "empty strings" begin
+    a = ""
+    b = "abc"
+    for i in 1:4
+        @test findnext(a, b, i) === i:i-1
+        @test findprev(a, b, i-1) === i:i-1
+    end
+    @test findnext(a, b, 5) === nothing
+    @test findprev(a, b, -1) === nothing
+    @test findfirst(a, b) === 1:0
+    @test findlast(a, b) === 4:3
+end
+
+@testset "sign-sensitive find functions (#40006)" begin
+    @test findfirst(==(Int8(-1)), [0xff]) === nothing
+    @test findnext(==(Int8(-1)), [0xff], 1) === nothing
+    @test findlast(==(Int8(-1)), [0xff]) === nothing
+    @test findprev(==(Int8(-1)), [0xff], 1) === nothing
+    @test findfirst(Int8[-1], [0xff]) === nothing
+    @test findnext(Int8[-1], [0xff], 1) === nothing
+    @test findlast(Int8[-1], [0xff]) === nothing
+    @test findprev(Int8[-1], [0xff], 1) === nothing
 end
