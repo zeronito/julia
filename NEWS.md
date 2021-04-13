@@ -95,6 +95,7 @@ Standard library changes
 * SuiteSparse is updated to 5.8.1. ([#39455])
 * The shape of an `UpperHessenberg` matrix is preserved under certain arithmetic operations, e.g. when multiplying or dividing by an `UpperTriangular` matrix. ([#40039])
 * `cis(A)` now supports matrix arguments ([#40194]).
+* Complex matrix multiplication now uses the `gemm3m` function when supported by BLAS. The new method has the same accuracy characteristics as the standard one, with the exception of small real or imaginary parts arising from cancellation of larger numbers, such as `imag((I + im * ε * A)^2)/ε` where `A` is a real matrix and `ε` a small number ([#33001]).
 
 #### Markdown
 
