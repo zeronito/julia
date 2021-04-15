@@ -1303,6 +1303,8 @@ end
 Insert an `item` into `a` at the given `index`. `index` is the index of `item` in
 the resulting `a`.
 
+See [`inserteach!`](@ref) for inserting the elements of a vector into another vector.
+
 # Examples
 ```jldoctest
 julia> insert!([6, 5, 4, 2, 1], 4, 3)
@@ -1321,6 +1323,158 @@ function insert!(a::Array{T,1}, i::Integer, item) where T
     _growat!(a, i, 1)
     # _growat! already did bound check
     @inbounds a[i] = _item
+    return a
+end
+
+"""
+    inserteach!(a::Vector, index::Integer, items::Vector)
+
+Insert all of the elements of `items` into `a` at the given `index`. `index` is the index of first element of `items` in the resulting `a`.
+
+# Examples
+```jldoctest
+julia> inserteach!([1, 2, 3], 2, [8, 9])
+5-element Array{Int64,1}:
+ 1
+ 8
+ 9
+ 2
+ 3
+```
+"""
+function inserteach!(a::Vector, index::Integer, items::AbstractVector)
+    m = length(items)
+    if m === 0
+        return a
+    end
+    _growat!(a, index, m)  # does bound check
+    @inbounds for k = index:index+m-1
+        a[k] = items[k-index+1]
+    end
+    return a
+end
+
+"""
+    inserteach!(a::Vector, indices, items::Vector)
+
+Insert all of the elements of `items` into `a` for the given `indices`.
+
+`indices` shows the indices in the original `a`, and it can be a Vector, UnitRange, StepRange, or Vector{Bool}.
+
+# Examples
+Inserts `0` between each two elements:
+```jldoctest
+julia> inserteach!([1, 2, 3, 4, 5, 6], 1:2:5, [0, 0, 0])
+9-element Array{Int64,1}:
+  0
+  1
+  2
+  0
+  3
+  4
+  0
+  5
+  6
+```
+
+Inserts `10, 9, and 8` at
+```jldoctest
+julia> inserteach!([1, 2, 3, 4, 5, 6], 1:2:5, [0, 0, 0])
+9-element Array{Int64,1}:
+  0
+  1
+  2
+  0
+  3
+  4
+  0
+  5
+  6
+```
+
+For `Bool` indices, each `true` shows insertion index for each item:
+```jldoctest
+julia> inserteach!([1, 2, 3], [false, false, true, true], [10, 9])
+5-element Array{Int64,1}:
+ 10
+  1
+  2
+  9
+  3
+```
+"""
+function inserteach!(a::Vector, indices::Union{AbstractVector, AbstractRange{<:Integer}}, items::AbstractVector)
+    itemslen = length(items)
+    indiceslen = length(indices)
+    if itemslen !== indiceslen
+        throw(DimensionMismatch("Length of the indices and items should be the same"))
+    elseif itemslen === 0
+        return a
+    end
+    if issorted(indices) # based on the tests overhead/advantage is low
+        indices_sorted = indices
+        items_sorted = items
+    else
+        # sorts so the final index is correct
+        indices_sorted, items_sorted = sort_indices_items(indices, items)
+    end
+    _inserteach!(a, indices_sorted, items_sorted)
+    return a
+end
+
+function sort_indices_items(indices::AbstractVector, items)
+    sort_indices = sortperm(indices)
+    indices_sorted = indices[sort_indices]
+    items_sorted = items[sort_indices]
+    return indices_sorted, items_sorted
+end
+
+function sort_indices_items(indices::AbstractRange{<:Integer}, items)
+    indices_sorted = sort(indices) # sorting them is faster than indexing into them
+    sort_indices = sortperm(indices)
+    items_sorted = items[sort_indices]
+    return indices_sorted, items_sorted
+end
+
+function _inserteach!(a, indices, items)
+    # Insert items into `a` such that `items[j]` is placed between the elements
+    # `a[indices[j-1]:indices[j]]`.
+    read_idx = lastindex(a)
+    resize!(a, length(a) + length(items))
+    insert_idx = lastindex(a)
+    for (new_idx,newitem) in zip(Iterators.reverse(indices), Iterators.reverse(items))
+        while read_idx >= new_idx
+            a[insert_idx] = a[read_idx]
+            read_idx -= 1
+            insert_idx -= 1
+        end
+        a[insert_idx] = newitem
+        insert_idx -= 1
+    end
+end
+
+function inserteach!(a::Vector, r::AbstractUnitRange{<:Integer}, items::AbstractVector)
+    ilen = length(items)
+    rlen = length(r)
+    if ilen !== rlen
+        throw(DimensionMismatch("Length of the range and items should be the same"))
+    else
+        return inserteach!(a, first(r), items)
+    end
+end
+
+function inserteach!(a::Vector, boolindices::AbstractVector{Bool}, items::AbstractVector)
+    alen = length(a)
+    itemslen = length(items)
+    boolindiceslen = length(boolindices)
+    indices = findall(x -> x=== true, boolindices) # no sort needed afterwards
+    indiceslen = length(indices)
+    if itemslen !== indiceslen
+        throw(ArgumentError("Number of true indices should be the same as length of items"))
+    elseif itemslen === 0
+        return a
+    end
+    _inserteach!(a, indices, items)
     return a
 end
 

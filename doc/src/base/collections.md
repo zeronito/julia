@@ -272,6 +272,7 @@ Base.popat!
 Base.pushfirst!
 Base.popfirst!
 Base.insert!
+Base.inserteach!
 Base.deleteat!
 Base.splice!
 Base.resize!

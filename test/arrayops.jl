@@ -465,6 +465,39 @@ end
         @test vc == [v[1:(i-1)]; 5; v[i:end]]
     end
     @test_throws BoundsError insert!(v, 5, 5)
+
+    @test inserteach!([6, 5, 4, 2, 1], 4, [8, 9, 9]) == [6, 5, 4, 8, 9, 9, 2, 1]
+    @test_throws BoundsError inserteach!([6, 5, 4], 5, [8, 9])
+
+    @test inserteach!([1, 2, 3, 4], 3:4, [8, 9]) == [1, 2, 8, 9, 3, 4]
+    @test_throws BoundsError inserteach!([6, 5, 4], 5:6, [8, 9])
+    @test_throws DimensionMismatch inserteach!([6, 5, 4], 4:6, [8, 9])
+
+    @test inserteach!([1, 2, 3, 4, 5], 6:-2:2, [10, 9, 8]) == [1, 8, 2, 9, 3, 10, 4, 5]
+    @test_throws BoundsError inserteach!([6, 5, 4], 6:-1:5, [8, 9])
+    @test_throws DimensionMismatch inserteach!([6, 5, 4], 5:-1:4, [8, 9, 9])
+
+    @test inserteach!([1, 2, 3], [true, false, true, false, false], [10, 9]) == [10, 1, 9, 2, 3]
+    @test_throws ArgumentError inserteach!([1, 2, 3], [true, false, true, false], [10, 9])
+    @test_throws ArgumentError inserteach!([1, 2, 3], [true, false, true, false, true], [10, 9])
+
+    # sorted indices vector
+    @test inserteach!([1, 2, 3, 4, 5], [4, 5, 6], [10, 9, 8]) ==
+    [1, 2, 3, 10, 9, 8, 4, 5]
+    # non-sorted indices vector
+    @test inserteach!([1, 2, 3, 4, 5], [6, 5, 4], [10, 9, 8]) ==
+    [1, 2, 3, 8, 9, 10, 4, 5]
+
+    # items of 0 length
+    @test Base.inserteach!([6, 5, 4, 2, 1], 4, []) == [6, 5, 4, 2, 1]
+    # items and indices of 0 length
+    @test Base.inserteach!([6, 5, 4, 2, 1], 4:3, []) == [6, 5, 4, 2, 1]
+    # items of 0 length and indices of any other length
+    @test_throws DimensionMismatch Base.inserteach!([6, 5, 4, 2, 1], 4:5, [])
+    # 0 index
+    @test_throws BoundsError Base.inserteach!([6, 5, 4, 2, 1], 0, [1, 2])
+    @test_throws BoundsError Base.inserteach!([6, 5, 4, 2, 1], 0:1, [1, 2])
+
 end
 
 @testset "popat!(::Vector, i, [default])" begin

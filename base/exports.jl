@@ -483,6 +483,7 @@ export
 # dequeues
     append!,
     insert!,
+    inserteach!,
     pop!,
     popat!,
     prepend!,
