@@ -349,7 +349,7 @@ end
 
 # allow new prompt methods to be defined if stdin has been
 # redirected to some custom stream, e.g. in IJulia.
-prompt(message::AbstractString; default::AbstractString="",timeout::Union{Nothing, Real} = nothing) = prompt(stdin, stdout, message, default=default, timeout=timeout)
+prompt(message::AbstractString; kwargs...) = prompt(stdin, stdout, message; kwargs...)
 
 # Windows authentication prompt
 if Sys.iswindows()
