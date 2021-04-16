@@ -519,23 +519,36 @@ let buf = IOBuffer()
 end
 
 # stdin is unavailable on the workers. Run test on master.
-remotecall_fetch(1) do
-    let buf = IOBuffer()
-        original_stdin = stdin
-        (rd, wr) = redirect_stdin()
-        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foobar"
-        @test String(take!(buf)) == "baz [foobar] timeout 1 second: timed out\n"
-        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 2) == "foobar"
-        @test String(take!(buf)) == "baz [foobar] timeout 2 seconds: timed out\n"
-        write(wr, "foo\n")
-        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foo"
-        @test String(take!(buf)) == "baz [foobar] timeout 1 second: "
-        write(wr, "\n")
-        @test Base.prompt(rd, buf, "baz", default="foobar", timeout = 1) == "foobar"
-        @test String(take!(buf)) == "baz [foobar] timeout 1 second: "
-        redirect_stdin(original_stdin)
+ret = Core.eval(Main, quote
+    remotecall_fetch(1) do
+        let buf = IOBuffer()
+            original_stdin = stdin
+            (rd, wr) = redirect_stdin()
+            vals = String[]
+            push!(vals, Base.prompt(rd, buf, "baz", default="foobar", timeout = 1))
+            push!(vals, String(take!(buf)))
+            push!(vals, Base.prompt(rd, buf, "baz", default="foobar", timeout = 2))
+            push!(vals, String(take!(buf)))
+            write(wr, "foo\n")
+            push!(vals, Base.prompt(rd, buf, "baz", default="foobar", timeout = 1))
+            push!(vals, String(take!(buf)))
+            write(wr, "\n")
+            push!(vals, Base.prompt(rd, buf, "baz", default="foobar", timeout = 1))
+            push!(vals, String(take!(buf)))
+            redirect_stdin(original_stdin)
+            vals
+        end
     end
-end
+end)
+
+@test ret[1] == "foobar"
+@test ret[2] == "baz [foobar] timeout 1 second: timed out\n"
+@test ret[3] == "foobar"
+@test ret[4] == "baz [foobar] timeout 2 seconds: timed out\n"
+@test ret[5] == "foo"
+@test ret[6] == "baz [foobar] timeout 1 second: "
+@test ret[7] == "foobar"
+@test ret[8] == "baz [foobar] timeout 1 second: "
 
 # these tests are not in a test block so that they will compile separately
 @static if Sys.iswindows()
