@@ -1,6 +1,7 @@
 ## openlibm ##
-OPENLIBM_GIT_URL := git://github.com/JuliaLang/openlibm.git
-OPENLIBM_TAR_URL = https://api.github.com/repos/JuliaLang/openlibm/tarball/$1
+ifneq ($(USE_BINARYBUILDER_OPENLIBM), 1)
+OPENLIBM_GIT_URL := git://github.com/JuliaMath/openlibm.git
+OPENLIBM_TAR_URL = https://api.github.com/repos/JuliaMath/openlibm/tarball/$1
 $(eval $(call git-external,openlibm,OPENLIBM,,,$(BUILDDIR)))
 
 OPENLIBM_FLAGS := ARCH="$(ARCH)" REAL_ARCH="$(MARCH)" CC="$(CC)" FC="$(FC)" AR="$(AR)" OS="$(OS)" USECLANG=$(USECLANG) USEGCC=$(USEGCC)
@@ -25,3 +26,9 @@ configure-openlibm: extract-openlibm
 compile-openlibm: $(BUILDDIR)/$(OPENLIBM_SRC_DIR)/build-compiled
 fastcheck-openlibm: check-openlibm
 check-openlibm: compile-openlibm
+
+else # USE_BINARYBUILDER_OPENLIBM
+
+$(eval $(call bb-install,openlibm,OPENLIBM,false))
+
+endif

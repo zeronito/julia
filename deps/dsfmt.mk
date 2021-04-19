@@ -1,9 +1,11 @@
 ## DSFMT ##
 
-DSFMT_CFLAGS := $(CFLAGS) -DNDEBUG -DDSFMT_MEXP=19937 $(fPIC) -DDSFMT_DO_NOT_USE_OLD_NAMES
+ifneq ($(USE_BINARYBUILDER_DSFMT),1)
+
+DSFMT_CFLAGS := $(CFLAGS) -DNDEBUG -DDSFMT_MEXP=19937 $(fPIC) -DDSFMT_DO_NOT_USE_OLD_NAMES -DDSFMT_SHLIB
 ifneq ($(USEMSVC), 1)
 DSFMT_CFLAGS += -O3 -finline-functions -fomit-frame-pointer -fno-strict-aliasing \
-		--param max-inline-insns-single=1800 -Wmissing-prototypes -Wall  -std=c99 -shared
+		--param max-inline-insns-single=1800 -Wall  -std=c99 -shared
 else
 DSFMT_CFLAGS += -Wl,-dll,-def:../../libdSFMT.def
 endif
@@ -11,18 +13,19 @@ ifeq ($(ARCH), x86_64)
 DSFMT_CFLAGS += -msse2 -DHAVE_SSE2
 endif
 
-$(SRCDIR)/srccache/dsfmt-$(DSFMT_VER).tar.gz: | $(SRCDIR)/srccache
-	$(JLDOWNLOAD) $@ http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/SFMT/dSFMT-src-$(DSFMT_VER).tar.gz
+$(SRCCACHE)/dsfmt-$(DSFMT_VER).tar.gz: | $(SRCCACHE)
+	$(JLDOWNLOAD) $@ https://github.com/MersenneTwister-Lab/dSFMT/archive/v$(DSFMT_VER).tar.gz
 	touch -c $@
 
-$(BUILDDIR)/dsfmt-$(DSFMT_VER)/source-extracted: $(SRCDIR)/srccache/dsfmt-$(DSFMT_VER).tar.gz
+$(BUILDDIR)/dsfmt-$(DSFMT_VER)/source-extracted: $(SRCCACHE)/dsfmt-$(DSFMT_VER).tar.gz
 	$(JLCHECKSUM) $<
 	-rm -r $(dir $@)
 	mkdir -p $(dir $@)
 	$(TAR) -C $(dir $@) --strip-components 1 -xf $<
-	cd $(dir $@) && patch < $(SRCDIR)/patches/dSFMT.h.patch
-	cd $(dir $@) && patch < $(SRCDIR)/patches/dSFMT.c.patch
 	echo 1 > $@
+
+checksum-dsfmt: $(SRCCACHE)/dsfmt-$(DSFMT_VER).tar.gz
+	$(JLCHECKSUM) $<
 
 $(BUILDDIR)/dsfmt-$(DSFMT_VER)/build-compiled: $(BUILDDIR)/dsfmt-$(DSFMT_VER)/source-extracted
 	cd $(dir $<) && \
@@ -52,11 +55,17 @@ clean-dsfmt:
 	-rm $(BUILDDIR)/dsfmt-$(DSFMT_VER)/libdSFMT.$(SHLIB_EXT)
 
 distclean-dsfmt:
-	-rm -rf $(SRCDIR)/srccache/dsfmt*.tar.gz $(SRCDIR)/srccache/dsfmt-$(DSFMT_VER) $(BUILDDIR)/dsfmt-$(DSFMT_VER)
+	-rm -rf $(SRCCACHE)/dsfmt*.tar.gz $(SRCCACHE)/dsfmt-$(DSFMT_VER) $(BUILDDIR)/dsfmt-$(DSFMT_VER)
 
-get-dsfmt: $(SRCDIR)/srccache/dsfmt-$(DSFMT_VER).tar.gz
+get-dsfmt: $(SRCCACHE)/dsfmt-$(DSFMT_VER).tar.gz
 extract-dsfmt: $(BUILDDIR)/dsfmt-$(DSFMT_VER)/source-extracted
 configure-dsfmt: extract-dsfmt
 compile-dsfmt: $(BUILDDIR)/dsfmt-$(DSFMT_VER)/build-compiled
 fastcheck-dsfmt: check-dsfmt
 check-dsfmt: $(BUILDDIR)/dsfmt-$(DSFMT_VER)/build-checked
+
+else
+
+$(eval $(call bb-install,dsfmt,DSFMT,false))
+
+endif # USE_BINARYBUILDER_DSFMT

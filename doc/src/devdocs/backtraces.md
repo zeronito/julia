@@ -11,25 +11,16 @@ and follow the instructions to generate the debugging information requested.  Ta
   * [Segfaults during bootstrap (`sysimg.jl`)](@ref)
   * [Segfaults when running a script](@ref)
   * [Errors during Julia startup](@ref)
+  * [Other generic segfaults or unreachables reached](@ref)
 
 ## [Version/Environment info](@id dev-version-info)
 
 No matter the error, we will always need to know what version of Julia you are running. When Julia
-first starts up, a header is printed out with a version number and date.  If your version is
-`0.2.0` or higher, please include the output of `versioninfo()` in any report you create:
+first starts up, a header is printed out with a version number and date. Please also include the output of `versioninfo()` (exported from the [`InteractiveUtils`](@ref InteractiveUtils.versioninfo) standard library) in any report you create:
 
-```julia
-julia> versioninfo()
-Julia Version 0.3.3-pre+25
-Commit 417b50a* (2014-11-03 11:32 UTC)
-Platform Info:
-  OS: Linux (x86_64-linux-gnu)
-  CPU: Intel(R) Core(TM) i7 CPU       L 640  @ 2.13GHz
-  WORD_SIZE: 64
-  BLAS: libopenblas (USE64BITINT DYNAMIC_ARCH NO_AFFINITY Nehalem)
-  LAPACK: libopenblas
-  LIBM: libopenlibm
-  LLVM: libLLVM-3.3
+```@repl
+using InteractiveUtils
+versioninfo()
 ```
 
 ## Segfaults during bootstrap (`sysimg.jl`)
@@ -112,9 +103,25 @@ the disk activity of the `julia` process:
     $ dtruss -f julia
     ```
 
-Create a [gist](https://gist.github.com) with the `strace`/ `dtruss` ouput, the [version info](@ref dev-version-info),
+Create a [gist](https://gist.github.com) with the `strace`/ `dtruss` output, the [version info](@ref dev-version-info),
 and any other pertinent information and open a new [issue](https://github.com/JuliaLang/julia/issues?q=is%3Aopen)
 on Github with a link to the gist.
+
+## Other generic segfaults or unreachables reached
+
+As mentioned elsewhere, `julia` has good integration with `rr` for generating traces; this includes, on Linux, the ability to automatically run `julia` under `rr` and share the trace after a crash. This can be immensely helpful when debugging such crashes and is strongly encouraged when reporting crash issues to the JuliaLang/julia repo. To run `julia` under `rr` automatically, do:
+
+```julia
+julia --bug-report=rr
+```
+
+To generate the `rr` trace locally, but not share, you can do:
+
+```julia
+julia --bug-report=rr-local
+```
+
+Note that this is only works on Linux. The blog post on [Time Travelling Bug Reporting](https://julialang.org/blog/2020/05/rr/) has many more details.
 
 ## Glossary
 

@@ -2,22 +2,15 @@
 
 #include "llvm-version.h"
 #include "platform.h"
-#include "options.h"
 
-#ifdef USE_MCJIT
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
-#include "fix_llvm_assert.h"
 #include "julia.h"
 #include "julia_internal.h"
 
-#if JL_LLVM_VERSION >= 30700
-#if JL_LLVM_VERSION < 30800
-#  include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
-#  include "fix_llvm_assert.h"
-#endif
 #ifdef _OS_LINUX_
 #  include <sys/syscall.h>
 #  include <sys/utsname.h>
+#  include <sys/resource.h>
 #endif
 #ifndef _OS_WINDOWS_
 #  include <sys/mman.h>
@@ -30,7 +23,9 @@
 #endif
 #ifdef _OS_FREEBSD_
 #  include <sys/types.h>
+#  include <sys/resource.h>
 #endif
+#include "julia_assert.h"
 
 namespace {
 
@@ -102,9 +97,11 @@ static bool check_fd_or_close(int fd)
 {
     if (fd == -1)
         return false;
-    fcntl(fd, F_SETFD, FD_CLOEXEC);
-    fchmod(fd, S_IRWXU);
-    if (ftruncate(fd, jl_page_size) != 0) {
+    int err = fcntl(fd, F_SETFD, FD_CLOEXEC);
+    assert(err == 0);
+    (void)err; // prevent compiler warning
+    if (fchmod(fd, S_IRWXU) != 0 ||
+        ftruncate(fd, jl_page_size) != 0) {
         close(fd);
         return false;
     }
@@ -211,9 +208,23 @@ static intptr_t get_anon_hdl(void)
 static size_t map_offset = 0;
 // Multiple of 128MB.
 // Hopefully no one will set a ulimit for this to be a problem...
-static constexpr size_t map_size_inc = 128 * 1024 * 1024;
+static constexpr size_t map_size_inc_default = 128 * 1024 * 1024;
 static size_t map_size = 0;
 static jl_mutex_t shared_map_lock;
+
+static size_t get_map_size_inc()
+{
+    rlimit rl;
+    if (getrlimit(RLIMIT_FSIZE, &rl) != -1) {
+        if (rl.rlim_cur != RLIM_INFINITY) {
+            return std::min<size_t>(map_size_inc_default, rl.rlim_cur);
+        }
+        if (rl.rlim_max != RLIM_INFINITY) {
+            return std::min<size_t>(map_size_inc_default, rl.rlim_max);
+        }
+    }
+    return map_size_inc_default;
+}
 
 static void *create_shared_map(size_t size, size_t id)
 {
@@ -229,7 +240,7 @@ static intptr_t init_shared_map()
     if (anon_hdl == -1)
         return -1;
     map_offset = 0;
-    map_size = map_size_inc;
+    map_size = get_map_size_inc();
     int ret = ftruncate(anon_hdl, map_size);
     if (ret != 0) {
         perror(__func__);
@@ -243,6 +254,7 @@ static void *alloc_shared_page(size_t size, size_t *id, bool exec)
     assert(size % jl_page_size == 0);
     size_t off = jl_atomic_fetch_add(&map_offset, size);
     *id = off;
+    size_t map_size_inc = get_map_size_inc();
     if (__unlikely(off + size > map_size)) {
         JL_LOCK_NOGC(&shared_map_lock);
         size_t old_size = map_size;
@@ -264,9 +276,34 @@ static void *alloc_shared_page(size_t size, size_t *id, bool exec)
 #ifdef _OS_LINUX_
 // Using `/proc/self/mem`, A.K.A. Keno's remote memory manager.
 
-static int self_mem_fd = -1;
+ssize_t pwrite_addr(int fd, const void *buf, size_t nbyte, uintptr_t addr)
+{
+    static_assert(sizeof(off_t) >= 8, "off_t is smaller than 64bits");
+#ifdef _P64
+    const uintptr_t sign_bit = uintptr_t(1) << 63;
+    if (__unlikely(sign_bit & addr)) {
+        // This case should not happen with default kernel on 64bit since the address belongs
+        // to kernel space (linear mapping).
+        // However, it seems possible to change this at kernel compile time.
 
-static int init_self_mem()
+        // pwrite doesn't support offset with sign bit set but lseek does.
+        // This is obviously not thread safe but none of the mem manager does anyway...
+        // From the kernel code, `lseek` with `SEEK_SET` can't fail.
+        // However, this can possibly confuse the glibc wrapper to think that
+        // we have invalid input value. Use syscall directly to be sure.
+        syscall(SYS_lseek, (long)fd, addr, (long)SEEK_SET);
+        // The return value can be -1 when the glibc syscall function
+        // think we have an error return with and `addr` that's too large.
+        // Ignore the return value for now.
+        return write(fd, buf, nbyte);
+    }
+#endif
+    return pwrite(fd, buf, nbyte, (off_t)addr);
+}
+
+// Do not call this directly.
+// Use `get_self_mem_fd` which has a guard to call this only once.
+static int _init_self_mem()
 {
     struct utsname kernel;
     uname(&kernel);
@@ -288,22 +325,34 @@ static int init_self_mem()
         return -1;
     fcntl(fd, F_SETFD, FD_CLOEXEC);
 #endif
-    // buffer to check if write works;
-    volatile uint64_t buff = 0;
-    uint64_t v = 0x12345678;
-    int ret = pwrite(fd, (void*)&v, sizeof(uint64_t), (uintptr_t)&buff);
-    if (ret != sizeof(uint64_t) || buff != 0x12345678) {
+
+    // Check if we can write to a RX page
+    void *test_pg = mmap(nullptr, jl_page_size, PROT_READ | PROT_EXEC,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    // We can ignore this though failure to allocate executable memory would be a bigger problem.
+    assert(test_pg != MAP_FAILED && "Cannot allocate executable memory");
+
+    const uint64_t v = 0xffff000012345678u;
+    int ret = pwrite_addr(fd, (const void*)&v, sizeof(uint64_t), (uintptr_t)test_pg);
+    if (ret != sizeof(uint64_t) || *(volatile uint64_t*)test_pg != v) {
+        munmap(test_pg, jl_page_size);
         close(fd);
         return -1;
     }
-    self_mem_fd = fd;
+    munmap(test_pg, jl_page_size);
+    return fd;
+}
+
+static int get_self_mem_fd()
+{
+    static int fd = _init_self_mem();
     return fd;
 }
 
 static void write_self_mem(void *dest, void *ptr, size_t size)
 {
     while (size > 0) {
-        ssize_t ret = pwrite(self_mem_fd, ptr, size, (uintptr_t)dest);
+        ssize_t ret = pwrite_addr(get_self_mem_fd(), ptr, size, (uintptr_t)dest);
         if ((size_t)ret == size)
             return;
         if (ret == -1 && (errno == EAGAIN || errno == EINTR))
@@ -657,7 +706,7 @@ public:
         : ROAllocator<exec>(),
           temp_buff()
     {
-        assert(self_mem_fd != -1);
+        assert(get_self_mem_fd() != -1);
     }
     void finalize() override
     {
@@ -706,6 +755,7 @@ class RTDyldMemoryManagerJL : public SectionMemoryManager {
     std::unique_ptr<ROAllocator<false>> ro_alloc;
     std::unique_ptr<ROAllocator<true>> exe_alloc;
     bool code_allocated;
+    size_t total_allocated;
 
 public:
     RTDyldMemoryManagerJL()
@@ -714,10 +764,11 @@ public:
           rw_alloc(),
           ro_alloc(),
           exe_alloc(),
-          code_allocated(false)
+          code_allocated(false),
+          total_allocated(0)
     {
 #ifdef _OS_LINUX_
-        if (!ro_alloc && init_self_mem() != -1) {
+        if (!ro_alloc && get_self_mem_fd() != -1) {
             ro_alloc.reset(new SelfMemAllocator<false>());
             exe_alloc.reset(new SelfMemAllocator<true>());
         }
@@ -730,21 +781,23 @@ public:
     ~RTDyldMemoryManagerJL() override
     {
     }
+    size_t getTotalBytes() { return total_allocated; }
     void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                           size_t Size) override;
+#if 0
+    // Disable for now since we are not actually using this.
     void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                             size_t Size) override;
+#endif
     uint8_t *allocateCodeSection(uintptr_t Size, unsigned Alignment,
                                  unsigned SectionID,
                                  StringRef SectionName) override;
     uint8_t *allocateDataSection(uintptr_t Size, unsigned Alignment,
                                  unsigned SectionID, StringRef SectionName,
                                  bool isReadOnly) override;
-#if JL_LLVM_VERSION >= 30800
     using SectionMemoryManager::notifyObjectLoaded;
     void notifyObjectLoaded(RuntimeDyld &Dyld,
                             const object::ObjectFile &Obj) override;
-#endif
     bool finalizeMemory(std::string *ErrMsg = nullptr) override;
     template <typename DL, typename Alloc>
     void mapAddresses(DL &Dyld, Alloc &&allocator)
@@ -796,6 +849,7 @@ uint8_t *RTDyldMemoryManagerJL::allocateCodeSection(uintptr_t Size,
     // allocating more than one code section can confuse libunwind.
     assert(!code_allocated);
     code_allocated = true;
+    total_allocated += Size;
     if (exe_alloc)
         return (uint8_t*)exe_alloc->alloc(Size, Alignment);
     return SectionMemoryManager::allocateCodeSection(Size, Alignment, SectionID,
@@ -808,6 +862,7 @@ uint8_t *RTDyldMemoryManagerJL::allocateDataSection(uintptr_t Size,
                                                     StringRef SectionName,
                                                     bool isReadOnly)
 {
+    total_allocated += Size;
     if (!isReadOnly)
         return (uint8_t*)rw_alloc.alloc(Size, Alignment);
     if (ro_alloc)
@@ -816,7 +871,6 @@ uint8_t *RTDyldMemoryManagerJL::allocateDataSection(uintptr_t Size,
                                                      SectionName, isReadOnly);
 }
 
-#if JL_LLVM_VERSION >= 30800
 void RTDyldMemoryManagerJL::notifyObjectLoaded(RuntimeDyld &Dyld,
                                                const object::ObjectFile &Obj)
 {
@@ -828,7 +882,6 @@ void RTDyldMemoryManagerJL::notifyObjectLoaded(RuntimeDyld &Dyld,
     assert(exe_alloc);
     mapAddresses(Dyld);
 }
-#endif
 
 bool RTDyldMemoryManagerJL::finalizeMemory(std::string *ErrMsg)
 {
@@ -860,22 +913,16 @@ void RTDyldMemoryManagerJL::registerEHFrames(uint8_t *Addr,
     }
 }
 
+#if 0
 void RTDyldMemoryManagerJL::deregisterEHFrames(uint8_t *Addr,
                                                uint64_t LoadAddr,
                                                size_t Size)
 {
     deregister_eh_frames((uint8_t*)LoadAddr, Size);
 }
-
-}
-
-#if JL_LLVM_VERSION < 30800
-void notifyObjectLoaded(RTDyldMemoryManager *memmgr,
-                        llvm::orc::ObjectLinkingLayerBase::ObjSetHandleT H)
-{
-    ((RTDyldMemoryManagerJL*)memmgr)->mapAddresses(**H);
-}
 #endif
+
+}
 
 #ifdef _OS_WINDOWS_
 void *lookupWriteAddressFor(RTDyldMemoryManager *memmgr, void *rt_addr)
@@ -884,12 +931,12 @@ void *lookupWriteAddressFor(RTDyldMemoryManager *memmgr, void *rt_addr)
 }
 #endif
 
-#else // JL_LLVM_VERSION >= 30700
-typedef SectionMemoryManager RTDyldMemoryManagerJL;
-#endif // JL_LLVM_VERSION >= 30700
-
 RTDyldMemoryManager* createRTDyldMemoryManager()
 {
     return new RTDyldMemoryManagerJL();
 }
-#endif // USE_MCJIT
+
+size_t getRTDyldMemoryManagerTotalBytes(RTDyldMemoryManager *mm)
+{
+    return ((RTDyldMemoryManagerJL*)mm)->getTotalBytes();
+}

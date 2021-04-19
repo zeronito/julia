@@ -41,7 +41,7 @@
 
 struct ABI_PPC64leLayout : AbiLayout {
 
-// count the homogeneous floating agregate size (saturating at max count of 8)
+// count the homogeneous floating aggregate size (saturating at max count of 8)
 unsigned isHFA(jl_datatype_t *ty, jl_datatype_t **ty0, bool *hva) const
 {
     size_t i, l = ty->layout->nfields;
@@ -83,7 +83,7 @@ unsigned isHFA(jl_datatype_t *ty, jl_datatype_t **ty0, bool *hva) const
     int n = 0;
     for (i = 0; i < l; i++) {
         jl_datatype_t *fld = (jl_datatype_t*)jl_field_type(ty, i);
-        if (!jl_is_datatype(fld) || ((jl_datatype_t*)fld)->layout == NULL)
+        if (!jl_is_datatype(fld) || ((jl_datatype_t*)fld)->layout == NULL || jl_is_layout_opaque(((jl_datatype_t*)fld)->layout))
             return 9;
         n += isHFA((jl_datatype_t*)fld, ty0, hva);
         if (n > 8)
@@ -133,18 +133,19 @@ Type *preferred_llvm_type(jl_datatype_t *dt, bool isret) const override
         else {
             jl_datatype_t *vecty = (jl_datatype_t*)jl_field_type(ty0, 0);
             assert(jl_is_datatype(vecty) && vecty->name == jl_vecelement_typename);
-            jl_value_t *elemty = jl_tparam0(vecty);
-            assert(jl_is_primitivetype(elemty));
-
-            Type *ety = julia_type_to_llvm(elemty);
+            Type *ety = bitstype_to_llvm(jl_tparam0(vecty));
+#if JL_LLVM_VERSION >= 110000
+            Type *vty = FixedVectorType::get(ety, jl_datatype_nfields(ty0));
+#else
             Type *vty = VectorType::get(ety, jl_datatype_nfields(ty0));
+#endif
             return ArrayType::get(vty, hfa);
         }
     }
     // rewrite integer-sized (non-HFA) struct to an array
     // the bitsize of the integer gives the desired alignment
     if (size > 8) {
-        if (dt->layout->alignment <= 8) {
+        if (jl_datatype_align(dt) <= 8) {
             return ArrayType::get(T_int64, (size + 7) / 8);
         }
         else {

@@ -3,8 +3,13 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "julia.h"
 #include "julia_internal.h"
+#ifndef _OS_WINDOWS_
+#include <unistd.h>
+#include <sys/mman.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -12,8 +17,9 @@ extern "C" {
 
 #include <threading.h>
 
-// Profiler control variables //
-static volatile intptr_t *bt_data_prof = NULL;
+// Profiler control variables
+// Note: these "static" variables are also used in "signals-*.c"
+static volatile jl_bt_element_t *bt_data_prof = NULL;
 static volatile size_t bt_size_max = 0;
 static volatile size_t bt_size_cur = 0;
 static volatile uint64_t nsecprof = 0;
@@ -22,6 +28,14 @@ static const    uint64_t GIGA = 1000000000ULL;
 // Timers to take samples at intervals
 JL_DLLEXPORT void jl_profile_stop_timer(void);
 JL_DLLEXPORT int jl_profile_start_timer(void);
+void jl_lock_profile(void);
+void jl_unlock_profile(void);
+
+JL_DLLEXPORT int jl_profile_is_buffer_full(void)
+{
+    // the latter `+ 1` is for the block terminator `0`.
+    return bt_size_cur + (JL_BT_MAX_ENTRY_SIZE + 1) + 1 > bt_size_max;
+}
 
 static uint64_t jl_last_sigint_trigger = 0;
 static uint64_t jl_disable_sigint_time = 0;
@@ -88,26 +102,182 @@ JL_DLLEXPORT void jl_exit_on_sigint(int on)
     exit_on_sigint = on;
 }
 
+static uintptr_t jl_get_pc_from_ctx(const void *_ctx);
+void jl_show_sigill(void *_ctx);
+static size_t jl_safe_read_mem(const volatile char *ptr, char *out, size_t len)
+{
+    jl_ptls_t ptls = jl_get_ptls_states();
+    jl_jmp_buf *old_buf = ptls->safe_restore;
+    jl_jmp_buf buf;
+    ptls->safe_restore = &buf;
+    volatile size_t i = 0;
+    if (!jl_setjmp(buf, 0)) {
+        for (;i < len;i++) {
+            out[i] = ptr[i];
+        }
+    }
+    ptls->safe_restore = old_buf;
+    return i;
+}
+
 #if defined(_WIN32)
 #include "signals-win.c"
 #else
 #include "signals-unix.c"
 #endif
 
-// what to do on a critical error
-void jl_critical_error(int sig, bt_context_t *context, uintptr_t *bt_data, size_t *bt_size)
+static uintptr_t jl_get_pc_from_ctx(const void *_ctx)
 {
-    // This function is not allowed to reference any TLS variables.
-    // We need to explicitly pass in the TLS buffer pointer when
-    // we make `jl_filename` and `jl_lineno` thread local.
+#if defined(_OS_LINUX_) && defined(_CPU_X86_64_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.gregs[REG_RIP];
+#elif defined(_OS_FREEBSD_) && defined(_CPU_X86_64_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.mc_rip;
+#elif defined(_OS_LINUX_) && defined(_CPU_X86_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.gregs[REG_EIP];
+#elif defined(_OS_FREEBSD_) && defined(_CPU_X86_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.mc_eip;
+#elif defined(_OS_DARWIN_) && defined(_CPU_x86_64_)
+    return ((ucontext64_t*)_ctx)->uc_mcontext64->__ss.__rip;
+#elif defined(_OS_DARWIN_) && defined(_CPU_AARCH64_)
+    return ((ucontext64_t*)_ctx)->uc_mcontext64->__ss.__pc;
+#elif defined(_OS_WINDOWS_) && defined(_CPU_X86_)
+    return ((CONTEXT*)_ctx)->Eip;
+#elif defined(_OS_WINDOWS_) && defined(_CPU_X86_64_)
+    return ((CONTEXT*)_ctx)->Rip;
+#elif defined(_OS_LINUX_) && defined(_CPU_AARCH64_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.pc;
+#elif defined(_OS_LINUX_) && defined(_CPU_ARM_)
+    return ((ucontext_t*)_ctx)->uc_mcontext.arm_pc;
+#else
+    // TODO for PPC
+    return 0;
+#endif
+}
+
+void jl_show_sigill(void *_ctx)
+{
+    char *pc = (char*)jl_get_pc_from_ctx(_ctx);
+    // unsupported platform
+    if (!pc)
+        return;
+#if defined(_CPU_X86_64_) || defined(_CPU_X86_)
+    uint8_t inst[15]; // max length of x86 instruction
+    size_t len = jl_safe_read_mem(pc, (char*)inst, sizeof(inst));
+    // ud2
+    if (len >= 2 && inst[0] == 0x0f && inst[1] == 0x0b) {
+        jl_safe_printf("Unreachable reached at %p\n", (void*)pc);
+    }
+    else {
+        jl_safe_printf("Invalid instruction at %p: ", (void*)pc);
+        for (int i = 0;i < len;i++) {
+            if (i == 0) {
+                jl_safe_printf("0x%02" PRIx8, inst[i]);
+            }
+            else {
+                jl_safe_printf(", 0x%02" PRIx8, inst[i]);
+            }
+        }
+        jl_safe_printf("\n");
+    }
+#elif defined(_OS_LINUX_) && defined(_CPU_AARCH64_)
+    uint32_t inst = 0;
+    size_t len = jl_safe_read_mem(pc, (char*)&inst, 4);
+    if (len < 4)
+        jl_safe_printf("Fault when reading instruction: %d bytes read\n", (int)len);
+    if (inst == 0xd4200020) { // brk #0x1
+        // The signal might actually be SIGTRAP instead, doesn't hurt to handle it here though.
+        jl_safe_printf("Unreachable reached at %p\n", pc);
+    }
+    else {
+        jl_safe_printf("Invalid instruction at %p: 0x%08" PRIx32 "\n", pc, inst);
+    }
+#elif defined(_OS_LINUX_) && defined(_CPU_ARM_)
+    ucontext_t *ctx = (ucontext_t*)_ctx;
+    if (ctx->uc_mcontext.arm_cpsr & (1 << 5)) {
+        // Thumb
+        uint16_t inst[2] = {0, 0};
+        size_t len = jl_safe_read_mem(pc, (char*)&inst, 4);
+        if (len < 2)
+            jl_safe_printf("Fault when reading Thumb instruction: %d bytes read\n", (int)len);
+        // LLVM and GCC uses different code for the trap...
+        if (inst[0] == 0xdefe || inst[0] == 0xdeff) {
+            // The signal might actually be SIGTRAP instead, doesn't hurt to handle it here though.
+            jl_safe_printf("Unreachable reached in Thumb mode at %p: 0x%04" PRIx16 "\n",
+                           (void*)pc, inst[0]);
+        }
+        else {
+            jl_safe_printf("Invalid Thumb instruction at %p: 0x%04" PRIx16 ", 0x%04" PRIx16 "\n",
+                           (void*)pc, inst[0], inst[1]);
+        }
+    }
+    else {
+        uint32_t inst = 0;
+        size_t len = jl_safe_read_mem(pc, (char*)&inst, 4);
+        if (len < 4)
+            jl_safe_printf("Fault when reading instruction: %d bytes read\n", (int)len);
+        // LLVM and GCC uses different code for the trap...
+        if (inst == 0xe7ffdefe || inst == 0xe7f000f0) {
+            // The signal might actually be SIGTRAP instead, doesn't hurt to handle it here though.
+            jl_safe_printf("Unreachable reached in ARM mode at %p: 0x%08" PRIx32 "\n",
+                           (void*)pc, inst);
+        }
+        else {
+            jl_safe_printf("Invalid ARM instruction at %p: 0x%08" PRIx32 "\n", (void*)pc, inst);
+        }
+    }
+#else
+    // TODO for PPC
+    (void)_ctx;
+#endif
+}
+
+// what to do on a critical error on a thread
+void jl_critical_error(int sig, bt_context_t *context)
+{
+
+    jl_ptls_t ptls = jl_get_ptls_states();
+    jl_bt_element_t *bt_data = ptls->bt_data;
+    size_t *bt_size = &ptls->bt_size;
     size_t i, n = *bt_size;
-    if (sig)
+    if (sig) {
+        // kill this task, so that we cannot get back to it accidentally (via an untimely ^C or jlbacktrace in jl_exit)
+        ptls->pgcstack = NULL;
+        ptls->safe_restore = NULL;
+        if (ptls->current_task) {
+            ptls->current_task->eh = NULL;
+            ptls->current_task->excstack = NULL;
+        }
+#ifndef _OS_WINDOWS_
+        sigset_t sset;
+        sigemptyset(&sset);
+        // n.b. In `abort()`, Apple's libSystem "helpfully" blocks all signals
+        // on all threads but SIGABRT. But we also don't know what the thread
+        // was doing, so unblock all critical signals so that they will crash
+        // hard, and not just get stuck.
+        sigaddset(&sset, SIGSEGV);
+        sigaddset(&sset, SIGBUS);
+        sigaddset(&sset, SIGILL);
+        // also unblock fatal signals now, so we won't get back here twice
+        sigaddset(&sset, SIGTERM);
+        sigaddset(&sset, SIGABRT);
+        sigaddset(&sset, SIGQUIT);
+        // and the original signal is now fatal too, in case it wasn't
+        // something already listed (?)
+        if (sig != SIGINT)
+            sigaddset(&sset, sig);
+        pthread_sigmask(SIG_UNBLOCK, &sset, NULL);
+#endif
         jl_safe_printf("\nsignal (%d): %s\n", sig, strsignal(sig));
-    jl_safe_printf("while loading %s, in expression starting on line %d\n", jl_filename, jl_lineno);
-    if (context)
-        *bt_size = n = rec_backtrace_ctx(bt_data, JL_MAX_BT_SIZE, context);
-    for (i = 0; i < n; i++)
-        jl_gdblookup(bt_data[i] - 1);
+    }
+    jl_safe_printf("in expression starting at %s:%d\n", jl_filename, jl_lineno);
+    if (context) {
+        // Must avoid extended backtrace frames here unless we're sure bt_data
+        // is properly rooted.
+        *bt_size = n = rec_backtrace_ctx(bt_data, JL_MAX_BT_SIZE, context, NULL);
+    }
+    for (i = 0; i < n; i += jl_bt_entry_size(bt_data + i)) {
+        jl_print_bt_entry_codeloc(bt_data + i);
+    }
     gc_debug_print_status();
     gc_debug_critical_error();
 }
@@ -121,7 +291,7 @@ JL_DLLEXPORT int jl_profile_init(size_t maxsize, uint64_t delay_nsec)
     nsecprof = delay_nsec;
     if (bt_data_prof != NULL)
         free((void*)bt_data_prof);
-    bt_data_prof = (intptr_t*) calloc(maxsize, sizeof(intptr_t));
+    bt_data_prof = (jl_bt_element_t*) calloc(maxsize, sizeof(jl_bt_element_t));
     if (bt_data_prof == NULL && maxsize > 0)
         return -1;
     bt_size_cur = 0;

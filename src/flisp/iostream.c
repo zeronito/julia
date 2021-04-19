@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <sys/types.h>
 #include "flisp.h"
+#include "utf8proc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -131,9 +132,12 @@ value_t fl_iogetc(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     argcount(fl_ctx, "io.getc", nargs, 1);
     ios_t *s = toiostream(fl_ctx, args[0], "io.getc");
     uint32_t wc;
-    if (ios_getutf8(s, &wc) == IOS_EOF)
+    int result = ios_getutf8(s, &wc);
+    if (result == IOS_EOF)
         //lerror(fl_ctx, IOError, "io.getc: end of file reached");
         return fl_ctx->FL_EOF;
+    if (result == 0)
+        lerror(fl_ctx, fl_ctx->IOError, "invalid UTF-8 sequence");
     return mk_wchar(fl_ctx, wc);
 }
 
@@ -142,8 +146,11 @@ value_t fl_iopeekc(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     argcount(fl_ctx, "io.peekc", nargs, 1);
     ios_t *s = toiostream(fl_ctx, args[0], "io.peekc");
     uint32_t wc;
-    if (ios_peekutf8(s, &wc) == IOS_EOF)
+    int result = ios_peekutf8(s, &wc);
+    if (result == IOS_EOF)
         return fl_ctx->FL_EOF;
+    if (result == 0)
+        lerror(fl_ctx, fl_ctx->IOError, "invalid UTF-8 sequence");
     return mk_wchar(fl_ctx, wc);
 }
 
@@ -167,6 +174,7 @@ value_t fl_ioungetc(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     if (wc >= 0x80) {
         lerror(fl_ctx, fl_ctx->ArgError, "io_ungetc: unicode not yet supported");
     }
+    s->u_colno -= utf8proc_charwidth(wc);
     return fixnum(ios_ungetc((int)wc,s));
 }
 
@@ -207,6 +215,13 @@ value_t fl_iolineno(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     argcount(fl_ctx, "input-port-line", nargs, 1);
     ios_t *s = toiostream(fl_ctx, args[0], "input-port-line");
     return size_wrap(fl_ctx, s->lineno);
+}
+
+value_t fl_iocolno(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
+{
+    argcount(fl_ctx, "input-port-column", nargs, 1);
+    ios_t *s = toiostream(fl_ctx, args[0], "input-port-column");
+    return size_wrap(fl_ctx, s->u_colno);
 }
 
 value_t fl_ioseek(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
@@ -333,14 +348,17 @@ value_t fl_ioreaduntil(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     ios_setbuf(&dest, data, 80, 0);
     char delim = get_delim_arg(fl_ctx, args[1], "io.readuntil");
     ios_t *src = toiostream(fl_ctx, args[0], "io.readuntil");
-    size_t n = ios_copyuntil(&dest, src, delim, 0);
+    size_t n = ios_copyuntil(&dest, src, delim);
     cv->len = n;
     if (dest.buf != data) {
         // outgrew initial space
-        cv->data = dest.buf;
+        size_t sz;
+        cv->data = ios_take_buffer(&dest, &sz);
         cv_autorelease(fl_ctx, cv);
     }
-    ((char*)cv->data)[n] = '\0';
+    else {
+        ((char*)cv->data)[n] = '\0';
+    }
     if (n == 0 && ios_eof(src))
         return fl_ctx->FL_EOF;
     return str;
@@ -352,7 +370,7 @@ value_t fl_iocopyuntil(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
     ios_t *dest = toiostream(fl_ctx, args[0], "io.copyuntil");
     ios_t *src = toiostream(fl_ctx, args[1], "io.copyuntil");
     char delim = get_delim_arg(fl_ctx, args[2], "io.copyuntil");
-    return size_wrap(fl_ctx, ios_copyuntil(dest, src, delim, 0));
+    return size_wrap(fl_ctx, ios_copyuntil(dest, src, delim));
 }
 
 value_t fl_iocopy(fl_context_t *fl_ctx, value_t *args, uint32_t nargs)
@@ -423,6 +441,7 @@ static const builtinspec_t iostreamfunc_info[] = {
     { "io.copyuntil", fl_iocopyuntil },
     { "io.tostring!", fl_iotostring },
     { "input-port-line", fl_iolineno },
+    { "input-port-column", fl_iocolno },
 
     { NULL, NULL }
 };

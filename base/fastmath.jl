@@ -5,7 +5,8 @@
 # This module provides versions of math functions that may violate
 # strict IEEE semantics.
 
-# This allows the following transformations:
+# This allows the following transformations. For more information see
+# http://llvm.org/docs/LangRef.html#fast-math-flags:
 # nnan: No NaNs - Allow optimizations to assume the arguments and
 #       result are not NaN. Such optimizations are required to retain
 #       defined behavior over NaNs, but the value of the result is
@@ -18,6 +19,9 @@
 #       zero argument or result as insignificant.
 # arcp: Allow Reciprocal - Allow optimizations to use the reciprocal
 #       of an argument rather than perform division.
+# fast: Fast - Allow algebraically equivalent transformations that may
+#       dramatically change results in floating point (e.g.
+#       reassociate). This flag implies all the others.
 
 module FastMath
 
@@ -56,7 +60,6 @@ const fast_op =
          :asin => :asin_fast,
          :asinh => :asinh_fast,
          :atan => :atan_fast,
-         :atan2 => :atan2_fast,
          :atanh => :atanh_fast,
          :cbrt => :cbrt_fast,
          :cis => :cis_fast,
@@ -67,7 +70,6 @@ const fast_op =
          :exp => :exp_fast,
          :expm1 => :expm1_fast,
          :hypot => :hypot_fast,
-         :lgamma => :lgamma_fast,
          :log10 => :log10_fast,
          :log1p => :log1p_fast,
          :log2 => :log2_fast,
@@ -76,6 +78,7 @@ const fast_op =
          :min => :min_fast,
          :minmax => :minmax_fast,
          :sin => :sin_fast,
+         :sincos => :sincos_fast,
          :sinh => :sinh_fast,
          :sqrt => :sqrt_fast,
          :tan => :tan_fast,
@@ -91,6 +94,9 @@ const rewrite_op =
 function make_fastmath(expr::Expr)
     if expr.head === :quote
         return expr
+    elseif expr.head === :call && expr.args[1] === :^ && expr.args[3] isa Integer
+        # mimic Julia's literal_pow lowering of literal integer powers
+        return Expr(:call, :(Base.FastMath.pow_fast), make_fastmath(expr.args[2]), Val{expr.args[3]}())
     end
     op = get(rewrite_op, expr.head, :nothing)
     if op !== :nothing
@@ -100,19 +106,20 @@ function make_fastmath(expr::Expr)
             # simple assignment
             expr = :($var = $op($var, $rhs))
         elseif isa(var, Expr) && var.head === :ref
+            var = var::Expr
             # array reference
             arr = var.args[1]
-            inds = tuple(var.args[2:end]...)
+            inds = var.args[2:end]
             arrvar = gensym()
-            indvars = tuple([gensym() for i in inds]...)
+            indvars = Any[gensym() for _ in inds]
             expr = quote
                 $(Expr(:(=), arrvar, arr))
-                $(Expr(:(=), Expr(:tuple, indvars...), Expr(:tuple, inds...)))
+                $(Expr(:(=), Base.exprarray(:tuple, indvars), Base.exprarray(:tuple, inds)))
                 $arrvar[$(indvars...)] = $op($arrvar[$(indvars...)], $rhs)
             end
         end
     end
-    Expr(make_fastmath(expr.head), map(make_fastmath, expr.args)...)
+    Base.exprarray(make_fastmath(expr.head), Base.mapany(make_fastmath, expr.args))
 end
 function make_fastmath(symb::Symbol)
     fast_symb = get(fast_op, symb, :nothing)
@@ -123,6 +130,27 @@ function make_fastmath(symb::Symbol)
 end
 make_fastmath(expr) = expr
 
+"""
+    @fastmath expr
+
+Execute a transformed version of the expression, which calls functions that
+may violate strict IEEE semantics. This allows the fastest possible operation,
+but results are undefined -- be careful when doing this, as it may change numerical
+results.
+
+This sets the [LLVM Fast-Math flags](http://llvm.org/docs/LangRef.html#fast-math-flags),
+and corresponds to the `-ffast-math` option in clang. See [the notes on performance
+annotations](@ref man-performance-annotations) for more details.
+
+# Examples
+```jldoctest
+julia> @fastmath 1+2
+3
+
+julia> @fastmath(sin(3))
+0.1411200080598672
+```
+"""
 macro fastmath(expr)
     make_fastmath(esc(expr))
 end
@@ -130,7 +158,7 @@ end
 
 # Basic arithmetic
 
-FloatTypes = Union{Float32, Float64}
+const FloatTypes = Union{Float16,Float32,Float64}
 
 sub_fast(x::FloatTypes) = neg_float_fast(x)
 
@@ -140,13 +168,14 @@ mul_fast(x::T, y::T) where {T<:FloatTypes} = mul_float_fast(x, y)
 div_fast(x::T, y::T) where {T<:FloatTypes} = div_float_fast(x, y)
 rem_fast(x::T, y::T) where {T<:FloatTypes} = rem_float_fast(x, y)
 
-add_fast{T<:FloatTypes}(x::T, y::T, zs::T...) =
+add_fast(x::T, y::T, zs::T...) where {T<:FloatTypes} =
     add_fast(add_fast(x, y), zs...)
-mul_fast{T<:FloatTypes}(x::T, y::T, zs::T...) =
+mul_fast(x::T, y::T, zs::T...) where {T<:FloatTypes} =
     mul_fast(mul_fast(x, y), zs...)
 
 @fastmath begin
     cmp_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(x==y, 0, ifelse(x<y, -1, +1))
+    log_fast(b::T, x::T) where {T<:FloatTypes} = log_fast(x)/log_fast(b)
 end
 
 eq_fast(x::T, y::T) where {T<:FloatTypes} = eq_float_fast(x, y)
@@ -161,7 +190,7 @@ issubnormal_fast(x) = false
 
 # complex numbers
 
-ComplexTypes = Union{Complex64, Complex128}
+ComplexTypes = Union{ComplexF32, ComplexF64}
 
 @fastmath begin
     abs_fast(x::ComplexTypes) = hypot(real(x), imag(x))
@@ -207,7 +236,16 @@ ComplexTypes = Union{Complex64, Complex128}
     eq_fast(a::T, y::Complex{T}) where {T<:FloatTypes} =
         (a==real(y)) & (T(0)==imag(y))
 
-    ne_fast{T<:ComplexTypes}(x::T, y::T) = !(x==y)
+    ne_fast(x::T, y::T) where {T<:ComplexTypes} = !(x==y)
+
+    # Note: we use the same comparison for min, max, and minmax, so
+    # that the compiler can convert between them
+    max_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, y, x)
+    min_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, x, y)
+    minmax_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, (x,y), (y,x))
+
+    max_fast(x::T, y::T, z::T...) where {T<:FloatTypes} = max_fast(max_fast(x, y), z...)
+    min_fast(x::T, y::T, z::T...) where {T<:FloatTypes} = min_fast(min_fast(x, y), z...)
 end
 
 # fall-back implementations and type promotion
@@ -220,7 +258,7 @@ for op in (:abs, :abs2, :conj, :inv, :sign)
     end
 end
 
-for op in (:+, :-, :*, :/, :(==), :!=, :<, :<=, :cmp, :rem)
+for op in (:+, :-, :*, :/, :(==), :!=, :<, :<=, :cmp, :rem, :min, :max, :minmax)
     op_fast = fast_op[op]
     @eval begin
         # fall-back implementation for non-numeric types
@@ -235,59 +273,37 @@ end
 
 
 # Math functions
+exp2_fast(x::Union{Float32,Float64})  = Base.Math.exp2_fast(x)
+exp_fast(x::Union{Float32,Float64})   = Base.Math.exp_fast(x)
+exp10_fast(x::Union{Float32,Float64}) = Base.Math.exp10_fast(x)
 
 # builtins
 
 pow_fast(x::Float32, y::Integer) = ccall("llvm.powi.f32", llvmcall, Float32, (Float32, Int32), x, y)
 pow_fast(x::Float64, y::Integer) = ccall("llvm.powi.f64", llvmcall, Float64, (Float64, Int32), x, y)
+pow_fast(x::FloatTypes, ::Val{p}) where {p} = pow_fast(x, p) # inlines already via llvm.powi
+@inline pow_fast(x, v::Val) = Base.literal_pow(^, x, v)
 
-# TODO: Change sqrt_llvm intrinsic to avoid nan checking; add nan
-# checking to sqrt in math.jl; remove sqrt_llvm_fast intrinsic
 sqrt_fast(x::FloatTypes) = sqrt_llvm_fast(x)
+sincos_fast(v::FloatTypes) = sincos(v)
 
-# libm
-
-const libm = Base.libm_name
-
-for f in (:acos, :acosh, :asin, :asinh, :atan, :atanh, :cbrt, :cos,
-          :cosh, :exp2, :exp, :expm1, :lgamma, :log10, :log1p, :log2,
-          :log, :sin, :sinh, :tan, :tanh)
-    f_fast = fast_op[f]
-    @eval begin
-        $f_fast(x::Float32) =
-            ccall(($(string(f,"f")),libm), Float32, (Float32,), x)
-        $f_fast(x::Float64) =
-            ccall(($(string(f)),libm), Float64, (Float64,), x)
-    end
+@inline function sincos_fast(v::Float16)
+    s, c = sincos_fast(Float32(v))
+    return Float16(s), Float16(c)
 end
-
-pow_fast(x::Float32, y::Float32) =
-    ccall(("powf",libm), Float32, (Float32,Float32), x, y)
-pow_fast(x::Float64, y::Float64) =
-    ccall(("pow",libm), Float64, (Float64,Float64), x, y)
-
-atan2_fast(x::Float32, y::Float32) =
-    ccall(("atan2f",libm), Float32, (Float32,Float32), x, y)
-atan2_fast(x::Float64, y::Float64) =
-    ccall(("atan2",libm), Float64, (Float64,Float64), x, y)
-
-# explicit implementations
+sincos_fast(v::AbstractFloat) = (sin_fast(v), cos_fast(v))
+sincos_fast(v::Real) = sincos_fast(float(v)::AbstractFloat)
+sincos_fast(v) = (sin_fast(v), cos_fast(v))
 
 @fastmath begin
-    exp10_fast(x::T) where {T<:FloatTypes} = exp2(log2(T(10))*x)
-    exp10_fast(x::Integer) = exp10(float(x))
-
     hypot_fast(x::T, y::T) where {T<:FloatTypes} = sqrt(x*x + y*y)
-
-    # Note: we use the same comparison for min, max, and minmax, so
-    # that the compiler can convert between them
-    max_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, y, x)
-    min_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, x, y)
-    minmax_fast(x::T, y::T) where {T<:FloatTypes} = ifelse(y > x, (x,y), (y,x))
 
     # complex numbers
 
-    cis_fast(x::T) where {T<:FloatTypes} = Complex{T}(cos(x), sin(x))
+    function cis_fast(x::T) where {T<:FloatTypes}
+        s, c = sincos_fast(x)
+        Complex{T}(c, s)
+    end
 
     # See <http://en.cppreference.com/w/cpp/numeric/complex>
     pow_fast(x::T, y::T) where {T<:ComplexTypes} = exp(y*log(x))
@@ -296,7 +312,7 @@ atan2_fast(x::Float64, y::Float64) =
     acos_fast(x::T) where {T<:ComplexTypes} =
         convert(T,π)/2 + im*log(im*x + sqrt(1-x*x))
     acosh_fast(x::ComplexTypes) = log(x + sqrt(x+1) * sqrt(x-1))
-    angle_fast(x::ComplexTypes) = atan2(imag(x), real(x))
+    angle_fast(x::ComplexTypes) = atan(imag(x), real(x))
     asin_fast(x::ComplexTypes) = -im*asinh(im*x)
     asinh_fast(x::ComplexTypes) = log(x + sqrt(1+x*x))
     atan_fast(x::ComplexTypes) = -im*atanh(im*x)
@@ -314,6 +330,7 @@ atan2_fast(x::Float64, y::Float64) =
     log1p_fast(x::ComplexTypes) = log(1+x)
     log2_fast(x::T) where {T<:ComplexTypes} = log(x) / log(convert(T,2))
     log_fast(x::T) where {T<:ComplexTypes} = T(log(abs2(x))/2, angle(x))
+    log_fast(b::T, x::T) where {T<:ComplexTypes} = T(log(x)/log(b))
     sin_fast(x::ComplexTypes) = -im*sinh(im*x)
     sinh_fast(x::T) where {T<:ComplexTypes} = convert(T,1)/2*(exp(x) - exp(-x))
     sqrt_fast(x::ComplexTypes) = sqrt(abs(x)) * cis(angle(x)/2)
@@ -324,7 +341,7 @@ end
 # fall-back implementations and type promotion
 
 for f in (:acos, :acosh, :angle, :asin, :asinh, :atan, :atanh, :cbrt,
-          :cis, :cos, :cosh, :exp10, :exp2, :exp, :expm1, :lgamma,
+          :cis, :cos, :cosh, :exp10, :exp2, :exp, :expm1,
           :log10, :log1p, :log2, :log, :sin, :sinh, :sqrt, :tan,
           :tanh)
     f_fast = fast_op[f]
@@ -333,7 +350,7 @@ for f in (:acos, :acosh, :angle, :asin, :asinh, :atan, :atanh, :cbrt,
     end
 end
 
-for f in (:^, :atan2, :hypot, :max, :min, :minmax)
+for f in (:^, :atan, :hypot, :log)
     f_fast = fast_op[f]
     @eval begin
         # fall-back implementation for non-numeric types

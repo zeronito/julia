@@ -17,7 +17,7 @@ int jl_printf(uv_stream_t *s, const char *format, ...);
 int jl_vprintf(uv_stream_t *s, const char *format, va_list args);
 ```
 
-These `printf` functions are used by the `.c` files in the `src/` and `ui/` directories wherever stdio is
+These `printf` functions are used by the `.c` files in the `src/` and `cli/` directories wherever stdio is
 needed to ensure that output buffering is handled in a unified way.
 
 In special cases, like signal handlers, where the full libuv infrastructure is too heavy, `jl_safe_printf()`
@@ -29,28 +29,28 @@ void jl_safe_printf(const char *str, ...);
 
 ## Interface between JL_STD* and Julia code
 
-[`Base.STDIN`](@ref), [`Base.STDOUT`](@ref) and [`Base.STDERR`](@ref) are bound to the `JL_STD*` libuv
+[`Base.stdin`](@ref), [`Base.stdout`](@ref) and [`Base.stderr`](@ref) are bound to the `JL_STD*` libuv
 streams defined in the runtime.
 
 Julia's `__init__()` function (in `base/sysimg.jl`) calls `reinit_stdio()` (in `base/stream.jl`)
-to create Julia objects for [`Base.STDIN`](@ref), [`Base.STDOUT`](@ref) and [`Base.STDERR`](@ref).
+to create Julia objects for [`Base.stdin`](@ref), [`Base.stdout`](@ref) and [`Base.stderr`](@ref).
 
 `reinit_stdio()` uses [`ccall`](@ref) to retrieve pointers to `JL_STD*` and calls `jl_uv_handle_type()`
 to inspect the type of each stream.  It then creates a Julia `Base.IOStream`, `Base.TTY` or `Base.PipeEndpoint`
 object to represent each stream, e.g.:
 
 ```
-$ julia -e 'println(typeof((STDIN, STDOUT, STDERR)))'
+$ julia -e 'println(typeof((stdin, stdout, stderr)))'
 Tuple{Base.TTY,Base.TTY,Base.TTY}
 
-$ julia -e 'println(typeof((STDIN, STDOUT, STDERR)))' < /dev/null 2>/dev/null
+$ julia -e 'println(typeof((stdin, stdout, stderr)))' < /dev/null 2>/dev/null
 Tuple{IOStream,Base.TTY,IOStream}
 
-$ echo hello | julia -e 'println(typeof((STDIN, STDOUT, STDERR)))' | cat
+$ echo hello | julia -e 'println(typeof((stdin, stdout, stderr)))' | cat
 Tuple{Base.PipeEndpoint,Base.PipeEndpoint,Base.TTY}
 ```
 
-The [`Base.read()`](@ref) and [`Base.write()`](@ref) methods for these streams use [`ccall`](@ref)
+The [`Base.read`](@ref) and [`Base.write`](@ref) methods for these streams use [`ccall`](@ref)
 to call libuv wrappers in `src/jl_uv.c`, e.g.:
 
 ```
@@ -83,6 +83,7 @@ It provides cross-platform buffered file IO and in-memory temporary buffers.
 
   * `src/flisp/*.c`
   * `src/dump.c` – for serialization file IO and for memory buffers.
+  * `src/staticdata.c` – for serialization file IO and for memory buffers.
   * `base/iostream.jl` – for file IO (see `base/fs.jl` for libuv equivalent).
 
 Use of `ios.c` in these modules is mostly self-contained and separated from the libuv I/O system.

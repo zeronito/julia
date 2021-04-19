@@ -17,14 +17,19 @@ Type *get_llvm_vectype(jl_datatype_t *dt) const
 {
     // Assume jl_is_datatype(dt) && !jl_is_abstracttype(dt)
     // `!dt->mutabl && dt->pointerfree && !dt->haspadding && dt->nfields > 0`
-    if (dt->layout == NULL)
+    if (dt->layout == NULL || jl_is_layout_opaque(dt->layout))
         return nullptr;
     size_t nfields = dt->layout->nfields;
     assert(nfields > 0);
     if (nfields < 2)
         return nullptr;
+#if JL_LLVM_VERSION >= 110000
+    static Type *T_vec64 = FixedVectorType::get(T_int32, 2);
+    static Type *T_vec128 = FixedVectorType::get(T_int32, 4);
+#else
     static Type *T_vec64 = VectorType::get(T_int32, 2);
     static Type *T_vec128 = VectorType::get(T_int32, 4);
+#endif
     Type *lltype;
     // Short vector should be either 8 bytes or 16 bytes.
     // Note that there are only two distinct fundamental types for
@@ -318,7 +323,7 @@ Type *classify_arg(jl_datatype_t *dt, bool *fpreg, bool *onstack,
     // with weird size as a black box composite type.
     // The type can fit in 8 x 8 bytes since it is handled by
     // need_pass_by_ref otherwise.
-    // 0-size types (Void) won't be rewritten and that is what we want
+    // 0-size types (Nothing) won't be rewritten and that is what we want
     assert(jl_datatype_size(dt) <= 16); // Should be pass by reference otherwise
     *rewrite_len = (jl_datatype_size(dt) + 7) >> 3;
     // Rewrite to [n x Int64] where n is the **size in dword**

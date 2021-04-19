@@ -1,9 +1,11 @@
 ## objconv ##
 
-$(SRCDIR)/srccache/objconv.zip: | $(SRCDIR)/srccache
-	$(JLDOWNLOAD) $@ http://www.agner.org/optimize/objconv.zip
+ifneq ($(USE_BINARYBUILDER_OBJCONV),1)
 
-$(BUILDDIR)/objconv/source-extracted: $(SRCDIR)/srccache/objconv.zip
+$(SRCCACHE)/objconv.zip: | $(SRCCACHE)
+	$(JLDOWNLOAD) $@ https://www.agner.org/optimize/objconv.zip
+
+$(BUILDDIR)/objconv/source-extracted: $(SRCCACHE)/objconv.zip
 	-rm -r $(dir $@)
 	mkdir -p $(BUILDDIR)
 	unzip -d $(dir $@) $<
@@ -22,12 +24,18 @@ clean-objconv:
 	-rm $(BUILDDIR)/objconv/build-compiled $(build_depsbindir)/objconv
 
 distclean-objconv:
-	-rm -rf $(SRCDIR)/srccache/objconv.zip $(BUILDDIR)/objconv
+	-rm -rf $(SRCCACHE)/objconv.zip $(BUILDDIR)/objconv
 
 
-get-objconv: $(SRCDIR)/srccache/objconv.zip
+get-objconv: $(SRCCACHE)/objconv.zip
 extract-objconv: $(BUILDDIR)/objconv/source-extracted
 configure-objconv: extract-objconv
 compile-objconv: $(BUILDDIR)/objconv/build-compiled
 fastcheck-objconv: check-objconv
 check-objconv: compile-objconv
+
+else
+
+$(eval $(call bb-install,objconv,OBJCONV,false))
+
+endif

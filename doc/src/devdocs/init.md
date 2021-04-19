@@ -2,21 +2,23 @@
 
 How does the Julia runtime execute `julia -e 'println("Hello World!")'` ?
 
-## main()
+## `main()`
 
-Execution starts at [`main()` in `ui/repl.c`](https://github.com/JuliaLang/julia/blob/master/ui/repl.c).
+Execution starts at [`main()` in `cli/loader_exe.c`](https://github.com/JuliaLang/julia/blob/master/cli/loader_exe.c),
+which calls `jl_load_repl()` in [`cli/loader_lib.c`](https://github.com/JuliaLang/julia/blob/master/cli/loader_lib.c)
+which loads a few libraries, eventually calling [`repl_entrypoint()` in `src/jlapi.c`](https://github.com/JuliaLang/julia/blob/master/src/jlapi.c).
 
-`main()` calls [`libsupport_init()`](https://github.com/JuliaLang/julia/blob/master/src/support/libsupportinit.c)
+`repl_entrypoint()` calls [`libsupport_init()`](https://github.com/JuliaLang/julia/blob/master/src/support/libsupportinit.c)
 to set the C library locale and to initialize the "ios" library (see [`ios_init_stdstreams()`](https://github.com/JuliaLang/julia/blob/master/src/support/ios.c)
 and [Legacy `ios.c` library](@ref)).
 
-Next [`parse_opts()`](https://github.com/JuliaLang/julia/blob/master/ui/repl.c) is called to process
-command line options. Note that `parse_opts()` only deals with options that affect code generation
+Next [`jl_parse_opts()`](https://github.com/JuliaLang/julia/blob/master/src/jloptions.c) is called to process
+command line options. Note that `jl_parse_opts()` only deals with options that affect code generation
 or early initialization. Other options are handled later by [`process_options()` in `base/client.jl`](https://github.com/JuliaLang/julia/blob/master/base/client.jl).
 
-`parse_opts()` stores command line options in the [global `jl_options` struct](https://github.com/JuliaLang/julia/blob/master/src/julia.h).
+`jl_parse_opts()` stores command line options in the [global `jl_options` struct](https://github.com/JuliaLang/julia/blob/master/src/julia.h).
 
-## julia_init()
+## `julia_init()`
 
 [`julia_init()` in `task.c`](https://github.com/JuliaLang/julia/blob/master/src/task.c) is called
 by `main()` and calls [`_julia_init()` in `init.c`](https://github.com/JuliaLang/julia/blob/master/src/init.c).
@@ -40,13 +42,13 @@ type description objects for the [built-in types defined in `julia.h`](https://g
 e.g.
 
 ```c
-jl_any_type = jl_new_abstracttype(jl_symbol("Any"), NULL, jl_null);
+jl_any_type = jl_new_abstracttype(jl_symbol("Any"), core, NULL, jl_emptysvec);
 jl_any_type->super = jl_any_type;
 
-jl_type_type = jl_new_abstracttype(jl_symbol("Type"), jl_any_type, jl_null);
+jl_type_type = jl_new_abstracttype(jl_symbol("Type"), core, jl_any_type, jl_emptysvec);
 
-jl_int32_type = jl_new_bitstype(jl_symbol("Int32"),
-                                jl_any_type, jl_null, 32);
+jl_int32_type = jl_new_primitivetype(jl_symbol("Int32"), core,
+                                     jl_any_type, jl_emptysvec, 32);
 ```
 
 [`jl_init_tasks()`](https://github.com/JuliaLang/julia/blob/master/src/task.c) creates the `jl_datatype_t* jl_task_type`
@@ -55,9 +57,8 @@ object; initializes the global `jl_root_task` struct; and sets `jl_current_task`
 [`jl_init_codegen()`](https://github.com/JuliaLang/julia/blob/master/src/codegen.cpp) initializes
 the [LLVM library](http://llvm.org).
 
-[`jl_init_serializer()`](https://github.com/JuliaLang/julia/blob/master/src/dump.c) initializes
-8-bit serialization tags for 256 frequently used `jl_value_t` values. The serialization mechanism
-uses these tags as shorthand (in lieu of storing whole objects) to save storage space.
+[`jl_init_serializer()`](https://github.com/JuliaLang/julia/blob/master/src/staticdata.c) initializes
+8-bit serialization tags for builtin `jl_value_t` values.
 
 If there is no sysimg file (`!jl_options.image_file`) then the `Core` and `Main` modules are
 created and `boot.jl` is evaluated:
@@ -71,8 +72,8 @@ an integer code for each [intrinsic function](https://github.com/JuliaLang/julia
 these symbols into LLVM instructions during code generation.
 
 [`jl_init_primitives()`](https://github.com/JuliaLang/julia/blob/master/src/builtins.c) hooks C
-functions up to Julia function symbols. e.g. the symbol `Base.is()` is bound to C function pointer
-`jl_f_is()` by calling `add_builtin_func("eval", jl_f_top_eval)`.
+functions up to Julia function symbols. e.g. the symbol `Core.:(===)()` is bound to C function pointer
+`jl_f_is()` by calling `add_builtin_func("===", jl_f_is)`.
 
 [`jl_new_main_module()`](https://github.com/JuliaLang/julia/blob/master/src/toplevel.c) creates
 the global "Main" module and sets `jl_current_task->current_module = jl_main_module`.
@@ -117,33 +118,33 @@ Other signals (`SIGINFO, SIGBUS, SIGILL, SIGTERM, SIGABRT, SIGQUIT, SIGSYS` and 
 hooked up to [`sigdie_handler()`](https://github.com/JuliaLang/julia/blob/master/src/signals-unix.c)
 which prints a backtrace.
 
-[`jl_init_restored_modules()`](https://github.com/JuliaLang/julia/blob/master/src/dump.c) calls
+[`jl_init_restored_modules()`](https://github.com/JuliaLang/julia/blob/master/src/staticdata.c) calls
 [`jl_module_run_initializer()`](https://github.com/JuliaLang/julia/blob/master/src/module.c) for
 each deserialized module to run the `__init__()` function.
 
 Finally [`sigint_handler()`](https://github.com/JuliaLang/julia/blob/master/src/signals-unix.c)
 is hooked up to `SIGINT` and calls `jl_throw(jl_interrupt_exception)`.
 
-`_julia_init()` then returns [back to `main()` in `ui/repl.c`](https://github.com/JuliaLang/julia/blob/master/ui/repl.c)
-and `main()` calls `true_main(argc, (char**)argv)`.
+`_julia_init()` then returns [back to `main()` in `cli/loader_exe.c`](https://github.com/JuliaLang/julia/blob/master/cli/loader_exe.c)
+and `main()` calls `repl_entrypoint(argc, (char**)argv)`.
 
 !!! sidebar "sysimg"
     If there is a sysimg file, it contains a pre-cooked image of the `Core` and `Main` modules (and
     whatever else is created by `boot.jl`). See [Building the Julia system image](@ref).
 
-    [`jl_restore_system_image()`](https://github.com/JuliaLang/julia/blob/master/src/dump.c) deserializes
+    [`jl_restore_system_image()`](https://github.com/JuliaLang/julia/blob/master/src/staticdata.c) deserializes
     the saved sysimg into the current Julia runtime environment and initialization continues after
     `jl_init_box_caches()` below...
 
-    Note: [`jl_restore_system_image()` (and `dump.c` in general)](https://github.com/JuliaLang/julia/blob/master/src/dump.c)
+    Note: [`jl_restore_system_image()` (and `staticdata.c` in general)](https://github.com/JuliaLang/julia/blob/master/src/staticdata.c)
     uses the [Legacy `ios.c` library](@ref).
 
-## true_main()
+## `repl_entrypoint()`
 
-[`true_main()`](https://github.com/JuliaLang/julia/blob/master/ui/repl.c) loads the contents of
+[`repl_entrypoint()`](https://github.com/JuliaLang/julia/blob/master/src/jlapi.c) loads the contents of
 `argv[]` into [`Base.ARGS`](@ref).
 
-If a `.jl` "program" file was supplied on the command line, then [`exec_program()`](https://github.com/JuliaLang/julia/blob/master/ui/repl.c)
+If a `.jl` "program" file was supplied on the command line, then [`exec_program()`](https://github.com/JuliaLang/julia/blob/master/src/jlapi.c)
 calls [`jl_load(program,len)`](https://github.com/JuliaLang/julia/blob/master/src/toplevel.c) which
 calls [`jl_parse_eval_all`](https://github.com/JuliaLang/julia/blob/master/src/ast.c) which repeatedly
 calls [`jl_toplevel_eval_flex()`](https://github.com/JuliaLang/julia/blob/master/src/toplevel.c)
@@ -153,13 +154,13 @@ However, in our example (`julia -e 'println("Hello World!")'`), [`jl_get_global(
 looks up [`Base._start`](https://github.com/JuliaLang/julia/blob/master/base/client.jl) and [`jl_apply()`](https://github.com/JuliaLang/julia/blob/master/src/julia.h)
 executes it.
 
-## Base._start
+## `Base._start`
 
 [`Base._start`](https://github.com/JuliaLang/julia/blob/master/base/client.jl) calls [`Base.process_options`](https://github.com/JuliaLang/julia/blob/master/base/client.jl)
 which calls [`jl_parse_input_line("println("Hello World!")")`](https://github.com/JuliaLang/julia/blob/master/src/ast.c)
 to create an expression object and [`Base.eval()`](@ref eval) to execute it.
 
-## Base.eval
+## `Base.eval`
 
 [`Base.eval()`](@ref eval) was [mapped to `jl_f_top_eval`](https://github.com/JuliaLang/julia/blob/master/src/builtins.c)
 by `jl_init_primitives()`.
@@ -218,14 +219,14 @@ Hello World!
 Since our example has just one function call, which has done its job of printing "Hello World!",
 the stack now rapidly unwinds back to `main()`.
 
-## jl_atexit_hook()
+## `jl_atexit_hook()`
 
 `main()` calls [`jl_atexit_hook()`](https://github.com/JuliaLang/julia/blob/master/src/init.c).
-This calls `_atexit` for each module, then calls [`jl_gc_run_all_finalizers()`](https://github.com/JuliaLang/julia/blob/master/src/gc.c)
+This calls `Base._atexit`, then calls [`jl_gc_run_all_finalizers()`](https://github.com/JuliaLang/julia/blob/master/src/gc.c)
 and cleans up libuv handles.
 
-## julia_save()
+## `julia_save()`
 
 Finally, `main()` calls [`julia_save()`](https://github.com/JuliaLang/julia/blob/master/src/init.c),
 which if requested on the command line, saves the runtime state to a new system image. See [`jl_compile_all()`](https://github.com/JuliaLang/julia/blob/master/src/gf.c)
-and [`jl_save_system_image()`](https://github.com/JuliaLang/julia/blob/master/src/dump.c).
+and [`jl_save_system_image()`](https://github.com/JuliaLang/julia/blob/master/src/staticdata.c).

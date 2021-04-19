@@ -11,11 +11,11 @@ Within `gdb`, any `jl_value_t*` object `obj` can be displayed using
 The object will be displayed in the `julia` session, not in the gdb session. This is a useful
 way to discover the types and values of objects being manipulated by Julia's C code.
 
-Similarly, if you're debugging some of Julia's internals (e.g., `inference.jl`), you can print
+Similarly, if you're debugging some of Julia's internals (e.g., `compiler.jl`), you can print
 `obj` using
 
 ```julia
-ccall(:jl_, Void, (Any,), obj)
+ccall(:jl_, Cvoid, (Any,), obj)
 ```
 
 This is a good way to circumvent problems that arise from the order in which julia's output streams
@@ -25,7 +25,7 @@ Julia's flisp interpreter uses `value_t` objects; these can be displayed with `c
 
 ## Useful Julia variables for Inspecting
 
-While the addresses of many variables, like singletons, can be be useful to print for many failures,
+While the addresses of many variables, like singletons, can be useful to print for many failures,
 there are a number of additional variables (see `julia.h` for a complete list) that are even more
 useful.
 
@@ -64,7 +64,7 @@ In your `gdb` session, set a breakpoint in `jl_breakpoint` like so:
 Then within your Julia code, insert a call to `jl_breakpoint` by adding
 
 ```julia
-ccall(:jl_breakpoint, Void, (Any,), obj)
+ccall(:jl_breakpoint, Cvoid, (Any,), obj)
 ```
 
 where `obj` can be any variable or tuple you want to be accessible in the breakpoint.
@@ -240,3 +240,10 @@ deterministically.  The replayed execution's address spaces, register contents, 
 are exactly the same in every run.
 
 A recent version of rr (3.1.0 or higher) is required.
+
+### Reproducing concurrency bugs with rr
+
+rr simulates a single-threaded machine by default. In order to debug concurrent
+code you can use `rr record --chaos` which will cause rr to simulate between
+one to eight cores, chosen randomly. You might therefore want to set `JULIA_NUM_THREADS=8`
+and rerun your code under rr until you have caught your bug.
