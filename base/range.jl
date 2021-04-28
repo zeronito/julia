@@ -924,9 +924,11 @@ function getindex(r::LinRange{T}, s::OrdinalRange{S}) where {T, S<:Integer}
     end
 end
 
-show(io::IO, r::AbstractRange) = print(io, repr(first(r)), ':', repr(step(r)), ':', repr(last(r)))
+show(io::IO, r::AbstractRange) = print(io, typeof(r), '(', repr(first(r)), ':', repr(step(r)), ':', repr(last(r)), ')')
+show(io::IO, r::AbstractUnitRange) = print(io, typeof(r), '(', repr(first(r)), ':', repr(last(r)), ')')
+show(io::IO, r::Union{StepRange, StepRangeLen}) = print(io, repr(first(r)), ':', repr(step(r)), ':', repr(last(r)))
 show(io::IO, r::UnitRange) = print(io, repr(first(r)), ':', repr(last(r)))
-show(io::IO, r::OneTo) = print(io, "Base.OneTo(", r.stop, ")")
+show(io::IO, r::OneTo) = print(io, typeof(r).name, '(', repr(last(r)), ')')
 
 function ==(r::T, s::T) where {T<:AbstractRange}
     isempty(r) && return isempty(s)
