@@ -848,3 +848,27 @@ end
     @test cumprod(x + 1 for x in 1:3) == [2, 6, 24]
     @test accumulate(+, (x^2 for x in 1:3); init=100) == [101, 105, 114]
 end
+
+@testset "IteratorIndexable" begin
+    @test Base.IteratorIndexable(1) == Base.IsIndexable()
+    @test Base.IteratorIndexable([1]) == Base.IsIndexable()
+    @test Base.IteratorIndexable(Ref(1)) == Base.IsIndexable()
+    @test Base.IteratorIndexable((1,2)) == Base.IsIndexable()
+    @test Base.IteratorIndexable("abc") == Base.IsIndexable()
+    @test Base.IteratorIndexable(Dict(1=>2)) == Base.NotIndexable()
+    @test Base.IteratorIndexable(skipmissing([1,2,3])) == Base.IsIndexable()
+    @test Base.IteratorIndexable(skipmissing(:x)) == Base.NotIndexable()
+    @test Base.IteratorIndexable(:x) == Base.NotIndexable()
+end
+
+@testset "eachindex_iteratortype" begin
+    A = CartesianIndices([1 2; 3 4])
+    @test Base.eachindex_iteratortype(1) == Base.OneTo{Int}
+    @test Base.eachindex_iteratortype([1]) == Base.OneTo{Int}
+    @test Base.eachindex_iteratortype(A) == CartesianIndices{2, NTuple{2, Base.OneTo{Int}}}
+    @test Base.eachindex_iteratortype(Ref(1)) === missing
+    @test Base.eachindex_iteratortype("abc") == Base.EachStringIndex{String}
+    @test Base.eachindex_iteratortype(Dict(1=>2)) === missing
+    @test Base.eachindex_iteratortype(:x) === missing
+end
+

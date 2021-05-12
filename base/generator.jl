@@ -128,3 +128,67 @@ IteratorEltype(::Type) = HasEltype()  # HasEltype is the default
 IteratorEltype(::Type{Generator{I,T}}) where {I,T} = EltypeUnknown()
 
 IteratorEltype(::Type{Any}) = EltypeUnknown()
+
+
+abstract type IteratorIndexable end
+struct IsIndexable <: IteratorIndexable end
+struct NotIndexable <: IteratorIndexable end
+
+"""
+    IteratorIndexable(itertype::Type) -> IteratorIndexable
+
+Given the type of an iterator, return one of the following values:
+
+* `NotIndexable()` if `getindex` is not implemented or the elements it returns do not match the iterator's eltype.
+* `IsIndexable()` if `getindex(iterator, idxs...)::eltype(iterator)` is valid for some `iterator::itertype` and indexes `idxs`.
+
+The default value (for iterators that do not define this function) is `NotIndexable()`.
+
+```jldoctest
+julia> Base.IteratorIndexable([1,2,3])
+Base.IsIndexable()
+
+julia> Base.IteratorIndexable(Ref(1))
+Base.IsIndexable()
+
+julia> Base.IteratorIndexable(Set([1,2,3]))
+Base.NotIndexable()
+
+julia> Base.IteratorIndexable(Dict(1=>'a', 2=>'b'))
+Base.NotIndexable()
+
+```
+"""
+IteratorIndexable(x) = IteratorIndexable(typeof(x))
+IteratorIndexable(::Type) = NotIndexable()
+IteratorIndexable(::Type{<:Ref}) = IsIndexable()
+IteratorIndexable(::Type{<:AbstractArray}) = IsIndexable()
+IteratorIndexable(::Type{<:AbstractString}) = IsIndexable()
+IteratorIndexable(::Type{<:Tuple}) = IsIndexable()
+IteratorIndexable(::Type{<:Number}) = IsIndexable()
+IteratorIndexable(::Type{Core.SimpleVector}) = IsIndexable()
+
+"""
+    eachindex_iteratortype(x) -> Union{Type,Missing}
+
+Given an iterator `x`, return `Base.eachindextype(x)` if its type's `Base.IteratorIndexable` is `IsIndexable()`, otherwise return `missing`.
+
+```jldoctest
+julia> Base.eachindex_iteratortype([1,2,3])
+Base.OneTo{$Int}
+
+julia> Base.eachindex_iteratortype("abc")
+Base.EachStringIndex{String}
+
+julia> Base.eachindex_iteratortype(Dict(1=>'a', 2=>'b'))
+missing
+
+julia> Base.eachindex_iteratortype(:symbol)
+missing
+
+```
+"""
+eachindex_iteratortype(x) = eachindex_iteratortype(x, IteratorIndexable(x))
+eachindex_iteratortype(x, ::IsIndexable) = eachindextype(x)
+eachindex_iteratortype(x, ::IteratorIndexable) = missing
+
