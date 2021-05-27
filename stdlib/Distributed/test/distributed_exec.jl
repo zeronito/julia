@@ -981,16 +981,16 @@ let (p, p2) = filter!(p -> p != myid(), procs())
             error("test failed to throw")
         catch excpt
             if procs isa Int
-                ex = Any[excpt]
+                exs = Any[excpt]
             else
-                ex = (excpt::CompositeException).exceptions
+                exs = (excpt::CompositeException).exceptions
             end
-            for (p, ex) in zip(procs, ex)
-                local p
-                if procs isa Int || p != myid()
-                    @test (ex::RemoteException).pid == p
-                    ex = ((ex::RemoteException).captured::CapturedException).ex
+            for ex in exs  # Can no longer guarantee Exceptions show in proc order
+                if ex isa RemoteException
+                    @test procs isa Int || ex.pid != myid()
+                    ex = ex.captured.ex
                 else
+                    @test !(procs isa Int)
                     ex = (ex::TaskFailedException).task.exception
                 end
                 @test (ex::ErrorException).msg == msg
@@ -1682,6 +1682,66 @@ end
 @everywhere include("includefile.jl")
 for p in procs()
     @test @fetchfrom(p, i27429) == 27429
+end
+
+# issue #32677, ensuring no side-effects for Distributed
+let
+    (p, p2) = filter!(p -> p != myid(), procs())
+    t = Timer(t -> killjob("KILLING BY QUICK KILL WATCHDOG\n"), 120) # this test should take <20 seconds
+
+    f1 = (c,r) -> put!(c,1)
+    f2 = (c,r) -> put!(r,take!(c))
+    f3 = (c,r) -> undefined()
+
+    g1 = (fa, fb, c, r) -> @sync begin
+        @Distributed.spawnat p fa(c, r)
+        @Distributed.spawnat p2 fb(c, r)
+    end
+
+    g2 = (fa, fb, c, r) -> @sync begin
+        @Distributed.spawnat p fa(c, r)
+        @async fb(c, r)
+    end
+
+    g3 = (fa, fb, c, r) -> @sync begin
+        @async fa(c, r)
+        @Distributed.spawnat p fb(c, r)
+    end
+
+    g4 = (fa, fb, c, r) -> @sync begin
+        @Distributed.spawnat p fa(c, r)
+        @Threads.spawn fb(c, r)
+    end
+
+    g5 = (fa, fb, c, r) -> @sync begin
+        @Threads.spawn fa(c, r)
+        @Distributed.spawnat p fb(c, r)
+    end
+
+    for (fa,fb) in [(f1,f2),(f2,f1),(f1,f3),(f2,f3),(f3,f1),(f3,f2),(f3,f3)], g in [g1,g2,g3,g4,g5]
+        threw = nothing
+        c = Distributed.RemoteChannel(p)
+        r = Distributed.RemoteChannel()
+        try
+            g(fa, fb, c, r)
+        catch e
+            threw = e
+        end
+        if f3 in [fa,fb]
+            if (g, f3) in [(g2,fb),(g3,fa),(g4,fb),(g5,fa)]
+               @test threw.exceptions[1].task.exception isa UndefVarError
+            else
+               @test threw.exceptions[1].captured.ex isa UndefVarError
+            end
+        else
+            @test isnothing(threw)
+            @test take!(r) == 1
+        end
+        close(c)
+        close(r)
+    end
+
+    close(t) # stop the fast watchdog
 end
 
 include("splitrange.jl")

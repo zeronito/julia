@@ -874,3 +874,53 @@ end
     end
     @test sort!(collect(ys)) == 1:3
 end
+
+# issue #32677
+@testset "@sync exception handling" begin
+    t = Timer(t -> killjob("KILLING BY QUICK KILL WATCHDOG\n"), 60) # this test should take <10 seconds
+
+    f1 = (c,r) -> put!(c,1)
+    f2 = (c,r) -> put!(r,take!(c))
+    f3 = (c,r) -> undefined()
+
+    g1 = (fa, fb, c, r) -> @sync begin
+        @async fa(c, r)
+        @async fb(c, r)
+    end
+
+    g2 = (fa, fb, c, r) -> @sync begin
+        @Threads.spawn fa(c, r)
+        @async fb(c, r)
+    end
+
+    g3 = (fa, fb, c, r) -> @sync begin
+        @async fa(c, r)
+        @Threads.spawn fb(c, r)
+    end
+
+    g4 = (fa, fb, c, r) -> @sync begin
+        @Threads.spawn fa(c, r)
+        @Threads.spawn fb(c, r)
+    end
+
+    for (fa,fb) in [(f1,f2),(f2,f1),(f1,f3),(f2,f3),(f3,f1),(f3,f2),(f3,f3)], g in [g1,g2,g3,g4]
+        threw = nothing
+        c = Channel(0)
+        r = Channel(1)
+        try
+            g(fa, fb, c, r)
+        catch e
+            threw = e
+        end
+        if f3 in [fa,fb]
+            @test threw.exceptions[1].task.exception isa UndefVarError
+        else
+            @test isnothing(threw)
+            @test take!(r) == 1
+        end
+        close(c)
+        close(r)
+    end
+
+    close(t)
+end
