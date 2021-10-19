@@ -85,6 +85,8 @@ endif
 
 RT_LLVM_LIBS := support
 
+SRCS += getopt getopt_long
+
 SRCS += $(RUNTIME_SRCS)
 
 CODEGEN_SRCS += $(RUNTIME_CODEGEN_SRCS)
