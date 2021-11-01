@@ -35,7 +35,7 @@ aimg  = randn(n,n)/2
         @testset "non-symmetric eigen decomposition" begin
             d, v = eigen(a)
             for i in 1:size(a,2)
-                @test a*v[:,i] ≈ d[i]*v[:,i]
+                @test a*v[:,i] ≈ d[i]*v[:,i] # fragile
             end
             f = eigen(a)
             @test det(a) ≈ det(f)
@@ -109,8 +109,9 @@ aimg  = randn(n,n)/2
             end
             sortfunc = x -> real(x) + imag(x)
             f = eigen(a1_nsg, a2_nsg; sortby = sortfunc)
-            @test a1_nsg*f.vectors ≈ (a2_nsg*f.vectors) * Diagonal(f.values)
+            @test a1_nsg*f.vectors ≈ (a2_nsg*f.vectors) * Diagonal(f.values) # fragile
             @test f.values ≈ eigvals(a1_nsg, a2_nsg; sortby = sortfunc)
+            # next test is fragile
             @test prod(f.values) ≈ prod(eigvals(a1_nsg/a2_nsg, sortby = sortfunc)) atol=50000ε
             @test eigvecs(a1_nsg, a2_nsg; sortby = sortfunc) == f.vectors
             @test_throws ErrorException f.Z
@@ -119,6 +120,48 @@ aimg  = randn(n,n)/2
             @test d == f.values
             @test v == f.vectors
         end
+    end
+end
+
+breal = triu(ones(n,n)) + Diagonal(1:n)
+bimg = eps(Float32(1)) * randn(n,n)
+creal = Float64[0.5 0 0 0; 0 1 1 0; 0 0 1 0; 0 0 0 2] + eps(Float32(1)) * randn(4,4)
+cimg = eps(Float32(1)) * randn(4,4)
+dreal = Diagonal(1.0:1.0:Float64(n)) + eps(Float32(1)) * randn(n,n)
+@testset "$eltya extensions" for eltya in (Float32, Float64, ComplexF32, ComplexF64)
+    bb = convert(Matrix{eltya}, eltya <: Complex ? complex.(breal, bimg) : breal)
+    cc = convert(Matrix{eltya}, eltya <: Complex ? complex.(creal, cimg) : creal)
+    dd = convert(Matrix{eltya}, eltya <: Complex ? complex.(dreal, bimg) : dreal)
+    @testset "conditions and lvectors" begin
+        ed = eigen(dd, lvectors=true, valscond=true, vecscond=true)
+        ec = eigen(cc, lvectors=true, valscond=true, vecscond=true)
+        eb = eigen(bb, lvectors=true, valscond=true, vecscond=true)
+        # allow for small normalization errors
+        @test maximum(eb.rconde) <= 1 + sqrt(eps(real(eltya)))
+        # note no such guarantee for rcondv
+        @test minimum(ec.rconde) < 0.01
+        @test minimum(ec.rcondv) < 0.01
+        @test minimum(ed.rconde) > 0.1
+        @test minimum(ed.rcondv) > 0.1
+        @test ed.vectorsl' * dd ≈ Diagonal(ed.values) * ed.vectorsl'
+        @test eb.vectorsl' * bb ≈ Diagonal(eb.values) * eb.vectorsl'
+        @test ec.vectorsl' * cc ≈ Diagonal(ec.values) * ec.vectorsl'
+    end
+    @testset "eigen of Bidiagonal" begin
+        ff = Bidiagonal(diag(bb,0), diag(bb,1), :U)
+        ef = eigen(ff)
+        @test ef.unitary == false
+        @test norm(inv(ef) * ff - I) < sqrt(eps(real(eltya)))
+    end
+    @testset "eigen of Triangular" begin
+        ff = UpperTriangular(bb)
+        ef = eigen(ff)
+        @test ef.unitary == false
+        @test norm(inv(ef) * ff - I) < sqrt(eps(real(eltya)))
+        ff = LowerTriangular(copy(bb'))
+        ef = eigen(ff)
+        @test ef.unitary == false
+        @test norm(inv(ef) * ff - I) < sqrt(eps(real(eltya)))
     end
 end
 
@@ -167,6 +210,7 @@ end
     A = randn(3,3)
     @test eigvals(A') == eigvals(copy(A'))
     @test eigen(A')   == eigen(copy(A'))
+    A = A + A'
     @test eigmin(A') == eigmin(copy(A'))
     @test eigmax(A') == eigmax(copy(A'))
 end
@@ -187,21 +231,27 @@ end
     D32 = eigen(Float32.(C))
     F = eigen(complex(C))
     F32 = eigen(complex(Float32.(C)))
-    @test B isa Eigen{Float16, Float16, Matrix{Float16}, Vector{Float16}}
+    @test B isa Eigen{Float16, Float16, Matrix{Float16}, Vector{Float16}, Vector{Float16}}
     @test B.values isa Vector{Float16}
     @test B.vectors isa Matrix{Float16}
+    @test B.vectorsl isa Matrix{Float16}
     @test B.values ≈ B32.values
     @test B.vectors ≈ B32.vectors
-    @test D isa Eigen{ComplexF16, ComplexF16, Matrix{ComplexF16}, Vector{ComplexF16}}
+    @test B.vectorsl ≈ B32.vectorsl
+    @test D isa Eigen{ComplexF16, ComplexF16, Matrix{ComplexF16}, Vector{ComplexF16}, Vector{Float16}}
     @test D.values isa Vector{ComplexF16}
     @test D.vectors isa Matrix{ComplexF16}
+    @test D.vectorsl isa Matrix{ComplexF16}
     @test D.values ≈ D32.values
     @test D.vectors ≈ D32.vectors
-    @test F isa Eigen{ComplexF16, ComplexF16, Matrix{ComplexF16}, Vector{ComplexF16}}
+    @test D.vectorsl ≈ D32.vectorsl
+    @test F isa Eigen{ComplexF16, ComplexF16, Matrix{ComplexF16}, Vector{ComplexF16}, Vector{Float16}}
     @test F.values isa Vector{ComplexF16}
     @test F.vectors isa Matrix{ComplexF16}
+    @test F.vectorsl isa Matrix{ComplexF16}
     @test F.values ≈ F32.values
     @test F.vectors ≈ F32.vectors
+    @test F.vectorsl ≈ F32.vectorsl
 end
 
 end # module TestEigen
