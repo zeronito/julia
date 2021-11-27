@@ -2011,8 +2011,8 @@ Return `nothing` if there is no such element.
 Indices or keys are of the same type as those returned by [`keys(A)`](@ref)
 and [`pairs(A)`](@ref).
 
-A faster method is used for `findfirst(isequal(x), A)` when
-`RangeStepStyle(A) === RangeStepRegular()`.
+An optimized method is used for `findfirst(isequal(x), A)` when `A` is a range and
+`Base.RangeStepStyle(A) === Base.RangeStepRegular()`.
 
 # Examples
 ```jldoctest
@@ -2060,11 +2060,7 @@ findfirst(p::Union{Fix2{typeof(isequal),T},Fix2{typeof(==),T}}, r::AbstractUnitR
     first(r) <= p.x <= last(r) ? firstindex(r) + Int(p.x - first(r)) : nothing
 
 findfirst(p::Union{Fix2{typeof(isequal),T},Fix2{typeof(==),T}}, r::StepRange{T,S}) where {T,S} =
-    _findfirst(p, RangeStepStyle(r), r)
-
-_findfirst(p, ::RangeStepStyle, r) = _findfirst(p, r)
-
-function _findfirst(p::Union{Fix2{typeof(isequal)},Fix2{typeof(==)}}, ::RangeStepRegular, r::StepRange{T,S}) where {T,S}
+    RangeStepStyle(r) isa RangeStepRegular || return _findfirst(p, r)
     isempty(r) && return nothing
     minimum(r) <= p.x <= maximum(r) || return nothing
     d = convert(S, p.x - first(r))
