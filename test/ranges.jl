@@ -1878,7 +1878,6 @@ end
     end
 end
 
-<<<<<<< HEAD
 @testset "Type-stable intersect (#32410)" begin
     for T = (StepRange{Int,Int}, StepRange{BigInt,Int}, StepRange{BigInt,BigInt})
         @test @inferred(intersect(T(1:2:5), 1:5)) == 1:2:5
