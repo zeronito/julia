@@ -974,12 +974,47 @@ along with a summary of the test results.
 """
 mutable struct DefaultTestSet <: AbstractTestSet
     description::String
+    parent::Union{Nothing,AbstractTestSet}
     results::Vector{Any}
     n_passed::Int
     anynonpass::Bool
     verbose::Bool
 end
-DefaultTestSet(desc::AbstractString; verbose::Bool = false) = DefaultTestSet(String(desc)::String, [], 0, false, verbose)
+
+DefaultTestSet(
+    desc::AbstractString,
+    parent::Union{Nothing,AbstractTestSet} = nothing;
+    verbose::Bool = false,
+) = DefaultTestSet(String(desc)::String, parent, [], 0, false, verbose)
+
+function printdescription(io, ts::DefaultTestSet)
+    descs = [ts.description]
+    parent = ts.parent
+    while parent isa DefaultTestSet
+        push!(descs, parent.description)
+        parent = parent.parent
+    end
+    printstyled(io, "Test Set:", bold = true)
+    if length(descs) == 1
+        println(io, " ", descs[1])
+    else
+        println(io)
+        for (i, d) in enumerate(reverse!(descs))
+            println(io, " "^2(i - 1), d)
+        end
+    end
+end
+
+"""
+    subtestset(T::Type{<:AbstractTestSet}, description, parent; kwargs...) -> ts::T
+
+Create a test set `ts` of type `T` with the `description :: String` under the
+`parent :: AbstractTestSet` test set.  Default implementation ignores `parent`;
+i.e., it returns `T(description; kwargs...)`.
+"""
+subtestset(T::Type{<:AbstractTestSet}, desc, ::Any; kwargs...) = T(desc; kwargs...)
+subtestset(::Type{DefaultTestSet}, desc, parent; kwargs...) =
+    DefaultTestSet(desc, parent; kwargs...)
 
 # For a broken result, simply store the result
 record(ts::DefaultTestSet, t::Broken) = (push!(ts.results, t); t)
@@ -990,7 +1025,7 @@ record(ts::DefaultTestSet, t::Pass) = (ts.n_passed += 1; t)
 # but do not terminate. Print a backtrace.
 function record(ts::DefaultTestSet, t::Union{Fail, Error})
     if TESTSET_PRINT_ENABLE[]
-        print(ts.description, ": ")
+        printdescription(stdout, ts)
         # don't print for interrupted tests
         if !(t isa Error) || t.test_type !== :test_interrupted
             print(t)
@@ -1333,7 +1368,7 @@ function testset_beginend_call(args, tests, source)
     ex = quote
         _check_testset($testsettype, $(QuoteNode(testsettype.args[1])))
         local ret
-        local ts = $(testsettype)($desc; $options...)
+        local ts = subtestset($testsettype, $desc, get_testset(); $options...)
         push_testset(ts)
         # we reproduce the logic of guardseed, but this function
         # cannot be used as it changes slightly the semantic of @testset,
@@ -1417,7 +1452,7 @@ function testset_forloop(args, testloop, source)
             copy!(RNG, tmprng)
 
         end
-        ts = $(testsettype)($desc; $options...)
+        ts = subtestset($testsettype, $desc, parent_ts; $options...)
         push_testset(ts)
         first_iteration = false
         try
@@ -1438,6 +1473,7 @@ function testset_forloop(args, testloop, source)
         local oldseed = Random.GLOBAL_SEED
         Random.seed!(Random.GLOBAL_SEED)
         local tmprng = copy(RNG)
+        local parent_ts = get_testset()
         try
             let
                 $(Expr(:for, Expr(:block, [esc(v) for v in loopvars]...), blk))
