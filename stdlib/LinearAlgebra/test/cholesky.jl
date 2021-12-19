@@ -491,10 +491,10 @@ end
     A = Float16[4. 12. -16.; 12. 37. -43.; -16. -43. 98.]
     B = cholesky(A)
     B32 = cholesky(Float32.(A))
-    @test B isa Cholesky{Float16, Matrix{Float16}}
-    @test B.U isa UpperTriangular{Float16, Matrix{Float16}}
-    @test B.L isa LowerTriangular{Float16, Matrix{Float16}}
-    @test B.UL isa UpperTriangular{Float16, Matrix{Float16}}
+    @test B isa Cholesky{Float16, <:AbstractMatrix{Float16}}
+    @test B.U isa UpperTriangular{Float16, <:AbstractMatrix{Float16}}
+    @test B.L isa LowerTriangular{Float16, <:AbstractMatrix{Float16}}
+    @test B.UL isa UpperTriangular{Float16, <:AbstractMatrix{Float16}}
     @test B.U ≈ B32.U
     @test B.L ≈ B32.L
     @test B.UL ≈ B32.UL
@@ -512,6 +512,24 @@ end
     @test det(B)  ≈  det(A) atol=eps()
     @test logdet(B)  ==  -Inf
     @test logabsdet(B)[1] == -Inf
- end
+end
+
+@testset "accessing both L and U factors should avoid allocations" begin
+    n = 30
+    A = rand(n, n)
+    Apd = A'A
+    allowed_cost_of_overhead = 32
+    @assert sizeof(Apd) > 4allowed_cost_of_overhead  # ensure that we could positively identify extra copies
+
+    for uplo in (:L, :U)
+        C = Symmetric(Apd, uplo)
+        for val in (Val(true), Val(false))
+            B = cholesky(C, val)
+            B.L, B.U  # access once to ensure the accessor is compiled already
+            @test (@allocated B.L) <= allowed_cost_of_overhead
+            @test (@allocated B.U) <= allowed_cost_of_overhead
+        end
+    end
+end
 
 end # module TestCholesky

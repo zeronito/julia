@@ -65,7 +65,7 @@ julia> C.U
   ⋅    ⋅    3.0
 
 julia> C.L
-3×3 LowerTriangular{Float64, Matrix{Float64}}:
+3×3 LowerTriangular{Float64, Adjoint{Float64, Matrix{Float64}}}:
   2.0   ⋅    ⋅
   6.0  1.0   ⋅
  -8.0  5.0  3.0
@@ -386,7 +386,7 @@ julia> C.U
   ⋅    ⋅    3.0
 
 julia> C.L
-3×3 LowerTriangular{Float64, Matrix{Float64}}:
+3×3 LowerTriangular{Float64, Adjoint{Float64, Matrix{Float64}}}:
   2.0   ⋅    ⋅
   6.0  1.0   ⋅
  -8.0  5.0  3.0
@@ -510,9 +510,9 @@ function getproperty(C::Cholesky, d::Symbol)
     Cfactors = getfield(C, :factors)
     Cuplo    = getfield(C, :uplo)
     if d === :U
-        return UpperTriangular(Cuplo === char_uplo(d) ? Cfactors : copy(Cfactors'))
+        return UpperTriangular(Cuplo === char_uplo(d) ? Cfactors : Cfactors')
     elseif d === :L
-        return LowerTriangular(Cuplo === char_uplo(d) ? Cfactors : copy(Cfactors'))
+        return LowerTriangular(Cuplo === char_uplo(d) ? Cfactors : Cfactors')
     elseif d === :UL
         return (Cuplo === 'U' ? UpperTriangular(Cfactors) : LowerTriangular(Cfactors))
     else
@@ -526,9 +526,9 @@ function getproperty(C::CholeskyPivoted{T}, d::Symbol) where T<:BlasFloat
     Cfactors = getfield(C, :factors)
     Cuplo    = getfield(C, :uplo)
     if d === :U
-        return UpperTriangular(sym_uplo(Cuplo) == d ? Cfactors : copy(Cfactors'))
+        return UpperTriangular(sym_uplo(Cuplo) == d ? Cfactors : Cfactors')
     elseif d === :L
-        return LowerTriangular(sym_uplo(Cuplo) == d ? Cfactors : copy(Cfactors'))
+        return LowerTriangular(sym_uplo(Cuplo) == d ? Cfactors : Cfactors')
     elseif d === :p
         return getfield(C, :piv)
     elseif d === :P
