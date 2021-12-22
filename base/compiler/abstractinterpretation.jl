@@ -1784,6 +1784,8 @@ function abstract_eval_statement(interp::AbstractInterpreter, @nospecialize(e), 
                 end
             end
         end
+    elseif e.head === :syncregion
+        t = abstract_eval_statement(interp, e.args[1], vtypes, sv)
     else
         t = abstract_eval_value_expr(interp, e, vtypes, sv)
     end
@@ -1929,6 +1931,20 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
                 changes[sn] = VarState(Bottom, true)
             elseif isa(stmt, GotoNode)
                 pc´ = (stmt::GotoNode).label
+            elseif isa(stmt, DetachNode)
+                # A detach node has two edges we need to add
+                # the reattach edge to the work queue
+                l = (stmt::DetachNode).label
+                newstate_reattach = stupdate!(states[l], changes)
+                if newstate_reattach !== nothing
+                    if l < frame.pc´´
+                        frame.pc´´ = l
+                    end
+                    push!(W, l)
+                    states[l] = newstate_reattach
+                end
+            elseif isa(stmt, ReattachNode)
+                pc´ = (stmt::ReattachNode).label
             elseif isa(stmt, GotoIfNot)
                 condx = stmt.cond
                 condt = abstract_eval_value(interp, condx, changes, frame)
@@ -2046,6 +2062,7 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
                         changes = StateUpdate(fname, VarState(Any, false), changes, false)
                     end
                 elseif hd === :code_coverage_effect ||
+                       (stmt isa SyncNode) ||
                        (hd !== :boundscheck && # :boundscheck can be narrowed to Bool
                         hd !== nothing && is_meta_expr_head(hd))
                     # these do not generate code

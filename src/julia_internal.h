@@ -221,6 +221,7 @@ extern jl_array_t *_jl_debug_method_invalidation JL_GLOBALLY_ROOTED;
 extern JL_DLLEXPORT size_t jl_page_size;
 extern jl_function_t *jl_typeinf_func;
 extern JL_DLLEXPORT size_t jl_typeinf_world;
+extern JL_DLLEXPORT jl_function_t *jl_lower_tapir_func;
 extern _Atomic(jl_typemap_entry_t*) call_cache[N_CALL_CACHE] JL_GLOBALLY_ROOTED;
 extern jl_array_t *jl_all_methods JL_GLOBALLY_ROOTED;
 
@@ -1430,6 +1431,10 @@ extern JL_DLLEXPORT jl_sym_t *jl_throw_undef_if_not_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_getfield_undefref_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_gc_preserve_begin_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_gc_preserve_end_sym;
+extern JL_DLLEXPORT jl_sym_t *jl_detach_sym;
+extern JL_DLLEXPORT jl_sym_t *jl_reattach_sym;
+extern JL_DLLEXPORT jl_sym_t *jl_sync_sym;
+extern JL_DLLEXPORT jl_sym_t* jl_syncregion_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_coverageeffect_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_escape_sym;
 extern JL_DLLEXPORT jl_sym_t *jl_aliasscope_sym;

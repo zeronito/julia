@@ -825,6 +825,9 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
     # because removing dead blocks can invalidate the domtree.
     @timeit "domtree 2" domtree = construct_domtree(ir.cfg.blocks)
 
+    # Returns false iff promoting the fields to
+    is_parallel_promotable = parallel_sroa_checker(ir)
+
     for (idx, (intermediaries, defuse)) in defuses
         intermediaries = collect(intermediaries)
         # Check if there are any uses we did not account for. If so, the variable
@@ -885,7 +888,12 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
             isempty(du.uses) && continue
             push!(du.defs, newidx)
             ldu = compute_live_ins(ir.cfg, du)
-            phiblocks = isempty(ldu.live_in_bbs) ? Int[] : iterated_dominance_frontier(ir.cfg, ldu, domtree)
+            if isempty(ldu.live_in_bbs)
+                phiblocks = Int[]
+            else
+                phiblocks = iterated_dominance_frontier(ir.cfg, ldu, domtree)
+                is_parallel_promotable(phiblocks) || continue
+            end
             allblocks = sort(vcat(phiblocks, ldu.def_bbs))
             blocks[fidx] = phiblocks, allblocks
             if fidx + 1 > length(defexpr.args)
@@ -901,6 +909,7 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
             du = fielddefuse[fidx]
             ftyp = fieldtype(typ, fidx)
             if !isempty(du.uses)
+                isassigned(blocks, fidx) || continue
                 phiblocks, allblocks = blocks[fidx]
                 phinodes = IdDict{Int, SSAValue}()
                 for b in phiblocks
