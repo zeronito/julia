@@ -2265,3 +2265,12 @@ let r = Ptr{Cvoid}(20):-UInt(2):Ptr{Cvoid}(10)
     @test step(r) === -UInt(2)
     @test last(r) === Ptr{Cvoid}(10)
 end
+
+@testset "Char ranges are regular" begin
+    r = 'a':'z'
+    r2 = 'α':2:'ω'
+    r3 = StepRangeLen('a',3,10)
+    @test Base.RangeStepStyle(r) === Base.RangeStepRegular()
+    @test Base.RangeStepStyle(r2) === Base.RangeStepRegular()
+    @test Base.RangeStepStyle(r3) === Base.RangeStepRegular()
+end
