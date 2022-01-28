@@ -457,66 +457,39 @@ generic_norm1(x) = mapreduce(float ∘ norm, +, x)
 
 # faster computation of norm(x)^2, avoiding overflow for integers
 norm_sqr(x) = norm(x)^2
-norm_sqr(x::Number) = abs2(x)
-norm_sqr(x::Union{T,Complex{T},Rational{T}}) where {T<:Integer} = abs2(float(x))
+norm_sqr(x::T) where {T<:Number} = abs2(promote_type(T,Float64)(x))
 
 function generic_norm2(x)
-    maxabs = normInf(x)
-    (maxabs == 0 || isinf(maxabs)) && return maxabs
-    (v, s) = iterate(x)::Tuple
-    T = typeof(maxabs)
-    if isfinite(length(x)*maxabs*maxabs) && maxabs*maxabs != 0 # Scaling not necessary
-        sum::promote_type(Float64, T) = norm_sqr(v)
-        while true
-            y = iterate(x, s)
-            y === nothing && break
-            (v, s) = y
-            sum += norm_sqr(v)
-        end
-        return convert(T, sqrt(sum))
-    else
-        sum = abs2(norm(v)/maxabs)
-        while true
-            y = iterate(x, s)
-            y === nothing && break
-            (v, s) = y
-            sum += (norm(v)/maxabs)^2
-        end
-        return convert(T, maxabs*sqrt(sum))
+    isempty(x) && return norm(zero(eltype(x)))
+    T = typeof(norm(first(x)))
+    sT = promote_type(T, Float64)
+    ans = mapreduce(norm_sqr, +, x)
+    ans in (0, Inf) || return convert(T, sqrt(ans))
+    maxabs = sT(normInf(x))
+    ans = sT(0)
+    for v in x
+        ans += (norm(v)/maxabs)^2
     end
+    return convert(T, maxabs*sqrt(ans))
 end
 
 # Compute L_p norm ‖x‖ₚ = sum(abs(x).^p)^(1/p)
 # (Not technically a "norm" for p < 1.)
 function generic_normp(x, p)
-    (v, s) = iterate(x)::Tuple
-    if p > 1 || p < -1 # might need to rescale to avoid overflow
-        maxabs = p > 1 ? normInf(x) : normMinusInf(x)
-        (maxabs == 0 || isinf(maxabs)) && return maxabs
-        T = typeof(maxabs)
-    else
-        T = typeof(float(norm(v)))
+    isempty(x) && return float(norm(zero(eltype(itr))))
+    T = typeof(float(norm(first(x))))
+    sT = promote_type(T, Float64)
+    ans = sT(0)
+    for v in x
+        ans += sT(norm(v))^p
     end
-    spp::promote_type(Float64, T) = p
-    if -1 <= p <= 1 || (isfinite(length(x)*maxabs^spp) && maxabs^spp != 0) # scaling not necessary
-        sum::promote_type(Float64, T) = norm(v)^spp
-        while true
-            y = iterate(x, s)
-            y === nothing && break
-            (v, s) = y
-            sum += norm(v)^spp
-        end
-        return convert(T, sum^inv(spp))
-    else # rescaling
-        sum = (norm(v)/maxabs)^spp
-        while true
-            y = iterate(x, s)
-            y === nothing && break
-            (v, s) = y
-            sum += (norm(v)/maxabs)^spp
-        end
-        return convert(T, maxabs*sum^inv(spp))
+    ans in (0, Inf) || return convert(T, ans^inv(spp))
+    maxabs = p > 1 ? normInf(x) : normMinusInf(x)
+    ans = sT(0)
+    for v in x
+        ans += (sT(norm(v))/maxabs)^p
     end
+    return convert(T, ans^inv(p))
 end
 
 normMinusInf(x) = generic_normMinusInf(x)
