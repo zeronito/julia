@@ -102,6 +102,7 @@ New library features
 Standard library changes
 ------------------------
 
+* `mergewith` now supports `NamedTuple` ([#36291]).
 * `range` accepts either `stop` or `length` as a sole keyword argument ([#39241])
 * `precision` and `setprecision` now accept a `base` keyword ([#42428]).
 * `Iterators.reverse` (and hence `last`) now supports `eachline` iterators ([#42225]).

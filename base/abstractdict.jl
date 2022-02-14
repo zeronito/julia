@@ -319,6 +319,8 @@ the merged collections. If the same key is present in another collection, the
 value for that key will be the value it has in the last collection listed.
 See also [`mergewith`](@ref) for custom handling of values with the same key.
 
+See also [`mergewith`](@ref).
+
 # Examples
 ```jldoctest
 julia> a = Dict("foo" => 0.0, "bar" => 42.0)
@@ -348,9 +350,9 @@ merge(d::AbstractDict, others::AbstractDict...) =
     merge!(_typeddict(d, others...), others...)
 
 """
-    mergewith(combine, d::AbstractDict, others::AbstractDict...)
+    mergewith(combine, d, others...)
     mergewith(combine)
-    merge(combine, d::AbstractDict, others::AbstractDict...)
+    merge(combine::Union{Function,Type}, d::AbstractDict, others::AbstractDict...)
 
 Construct a merged collection from the given collections. If necessary, the
 types of the resulting collection will be promoted to accommodate the types of
@@ -361,8 +363,14 @@ combiner function.  The curried form `mergewith(combine)` returns the function
 Method `merge(combine::Union{Function,Type}, args...)` as an alias of
 `mergewith(combine, args...)` is still available for backward compatibility.
 
+This function supports `AbstractDict` and `NamedTuple` as the second
+argument `d`.
+
 !!! compat "Julia 1.5"
     `mergewith` requires Julia 1.5 or later.
+
+!!! compat "Julia 1.8"
+    `mergewith` on `NamedTuple` requires Julia 1.8 or later.
 
 # Examples
 ```jldoctest
@@ -384,6 +392,9 @@ Dict{String, Float64} with 3 entries:
 
 julia> ans == mergewith(+)(a, b)
 true
+
+julia> mergewith(+, (a = 1, b = 2), (b = 3, c = 4))
+(a = 1, b = 5, c = 4)
 ```
 """
 mergewith(combine, d::AbstractDict, others::AbstractDict...) =
