@@ -276,13 +276,11 @@ end
 
 
 ## structured matrix methods ##
-function Base.replace_in_print_matrix(A::Union{UpperTriangular,UnitUpperTriangular},
+isnonzeroindex(::Union{UpperTriangular,UnitUpperTriangular}, i::Integer, j::Integer) = i <= j
+isnonzeroindex(::Union{LowerTriangular,UnitLowerTriangular}, i::Integer, j::Integer) = i >= j
+function Base.replace_in_print_matrix(A::AbstractTriangular,
                                       i::Integer, j::Integer, s::AbstractString)
-    return i <= j ? s : Base.replace_with_centered_mark(s)
-end
-function Base.replace_in_print_matrix(A::Union{LowerTriangular,UnitLowerTriangular},
-                                      i::Integer, j::Integer, s::AbstractString)
-    return i >= j ? s : Base.replace_with_centered_mark(s)
+    return _replace_in_print_matrix(A, i, j, s)
 end
 
 function istril(A::Union{LowerTriangular,UnitLowerTriangular}, k::Integer=0)

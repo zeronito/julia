@@ -1529,6 +1529,13 @@ get(A::AbstractArray, I::RangeVecIntList, default) =
     get!(similar(A, typeof(default), index_shape(I...)), A, I, default)
 
 ## structured matrix methods ##
+isnonzeroindex(A::AbstractArray{<:Any, N}, inds::Vararg{Integer, N}) where {N} = true
+function isnonzeroindex(A::AbstractArray, inds...)
+    Ainds = to_indices(A, inds)
+    indsint = Tuple(CartesianIndices(A)[Ainds...])
+    isnonzeroindex(A, indsint...)
+end
+
 replace_in_print_matrix(A::AbstractMatrix,i::Integer,j::Integer,s::AbstractString) = s
 replace_in_print_matrix(A::AbstractVector,i::Integer,j::Integer,s::AbstractString) = s
 

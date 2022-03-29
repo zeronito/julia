@@ -14,7 +14,7 @@ import Base: USE_BLAS64, abs, acos, acosh, acot, acoth, acsc, acsch, adjoint, as
     getproperty, imag, inv, isapprox, isequal, isone, iszero, IndexStyle, kron, kron!, length, log, map, ndims,
     one, oneunit, parent, permutedims, power_by_squaring, print_matrix, promote_rule, real, round, sec, sech,
     setindex!, show, similar, sin, sincos, sinh, size, sqrt,
-    strides, stride, tan, tanh, transpose, trunc, typed_hcat, vec, zero
+    strides, stride, tan, tanh, transpose, trunc, typed_hcat, vec, zero, isnonzeroindex
 using Base: IndexLinear, promote_eltype, promote_op, promote_typeof,
     @propagate_inbounds, @pure, reduce, typed_hvcat, typed_vcat, require_one_based_indexing,
     splat
@@ -393,6 +393,12 @@ copy_similar(A::AbstractArray, ::Type{T}) where {T} = copyto!(similar(A, T, size
 # more efficient to use:
 # convert(AbstractArray{T}, A)
 
+# Common function used in displaying structured matrices.
+# Typically this is called within replace_in_print_matrix,
+# which is specialized for each matrix type
+function _replace_in_print_matrix(A, i, j, s)
+    return isnonzeroindex(A, i, j) ? s : Base.replace_with_centered_mark(s)
+end
 
 include("adjtrans.jl")
 include("transpose.jl")

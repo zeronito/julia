@@ -88,8 +88,9 @@ function setindex!(A::UpperHessenberg, x, i::Integer, j::Integer)
     return A
 end
 
+isnonzeroindex(::UpperHessenberg, i::Integer, j::Integer) = i <= j+1
 function Base.replace_in_print_matrix(A::UpperHessenberg, i::Integer, j::Integer, s::AbstractString)
-    return i <= j+1 ? s : Base.replace_with_centered_mark(s)
+    return _replace_in_print_matrix(A, i, j, s)
 end
 
 Base.copy(A::Adjoint{<:Any,<:UpperHessenberg}) = tril!(adjoint!(similar(A.parent.data), A.parent.data), 1)

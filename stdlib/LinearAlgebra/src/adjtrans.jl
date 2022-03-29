@@ -329,3 +329,11 @@ pinv(v::TransposeAbsVec, tol::Real = 0) = pinv(conj(v.parent)).parent
 ## complex conjugate
 conj(A::Transpose) = adjoint(A.parent)
 conj(A::Adjoint) = transpose(A.parent)
+
+# Structured matrix display
+isnonzeroindex(A::AdjOrTransAbsMat, i::Integer, j::Integer) = isnonzeroindex(parent(A), j, i)
+isnonzeroindex(A::AdjOrTransAbsVec, i::Integer, j::Integer) = isnonzeroindex(parent(A), j)
+function Base.replace_in_print_matrix(A::AdjOrTrans,
+        i::Integer, j::Integer, s::AbstractString)
+    return Base.replace_in_print_matrix(A.parent, j, i, s)
+end
