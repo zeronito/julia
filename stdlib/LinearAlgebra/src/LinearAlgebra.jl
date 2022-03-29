@@ -437,8 +437,8 @@ export ⋅, ×
 ## convenience methods
 ## return only the solution of a least squares problem while avoiding promoting
 ## vectors to matrices.
-_cut_B(x::AbstractVector, r::UnitRange) = length(x)  > length(r) ? x[r]   : x
-_cut_B(X::AbstractMatrix, r::UnitRange) = size(X, 1) > length(r) ? X[r,:] : X
+_cut_B(x::AbstractVector, r::OneTo) = length(x)  > length(r) ? x[r]   : x
+_cut_B(X::AbstractMatrix, r::OneTo) = size(X, 1) > length(r) ? X[r,:] : X
 
 # SymTridiagonal ev can be the same length as dv, but the last element is
 # ignored. However, some methods can fail if they read the entired ev
@@ -491,7 +491,7 @@ function (\)(F::Union{<:LAPACKFactorizations,Adjoint{<:Any,<:LAPACKFactorization
     # For tall problems, we compute a least squares solution so only part
     # of the rhs should be returned from \ while ldiv! uses (and returns)
     # the complete rhs
-    return _cut_B(BB, 1:n)
+    return _cut_B(BB, OneTo(n))
 end
 # disambiguate
 (\)(F::LAPACKFactorizations{T}, B::VecOrMat{Complex{T}}) where {T<:BlasReal} =
