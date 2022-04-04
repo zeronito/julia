@@ -282,6 +282,8 @@ include("task.jl")
 include("threads_overloads.jl")
 include("weakkeydict.jl")
 
+include("parallelism.jl")
+
 include("env.jl")
 
 # functions defined in Random
