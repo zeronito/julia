@@ -61,6 +61,10 @@
 # endif
 #endif
 
+#if defined(_CPU_RISCV64_)
+# define JL_USE_JITLINK
+#endif
+
 # include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 # include <llvm/ExecutionEngine/RTDyldMemoryManager.h>
 # include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>

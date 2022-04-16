@@ -1501,7 +1501,7 @@ void jl_dump_native_impl(void *native_code,
         RelocModel = Reloc::PIC_;
     }
     CodeModel::Model CMModel = CodeModel::Small;
-    if (TheTriple.isPPC()) {
+    if (TheTriple.isPPC() || TheTriple.isRISCV()) {
         // On PPC the small model is limited to 16bit offsets
         CMModel = CodeModel::Medium;
     }
