@@ -83,6 +83,11 @@ function _maxlength(t::Tuple, t2::Tuple, t3::Tuple...)
     max(length(t), _maxlength(t2, t3...))
 end
 
+function haskey(container::Tuple, key::Real)
+    @_inline_meta
+    key ∈ keys(container)
+end
+
 # this allows partial evaluation of bounded sequences of next() calls on tuples,
 # while reducing to plain next() for arbitrary iterables.
 indexed_iterate(t::Tuple, i::Int, state=1) = (@inline; (getfield(t, i), i+1))
