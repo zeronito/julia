@@ -1247,6 +1247,42 @@ end
     getglobal(@__MODULE__, :my_defined_var, :foo)
 end
 
+mutable struct Atomic{T}
+    @atomic x::T
+end
+
+muladd1(x, y) = muladd(x, y, one(x))
+
+@testset "`Core.Compiler.optimize_modifyfield!`" begin
+    @testset "modifyop is resolved and atomicrmw-elgible" begin
+        src = code_typed(Tuple{Atomic{Int}}) do a
+            @atomic a.x += 1
+        end |> only |> first
+        calls = filter(iscall((src, modifyfield!)), src.code)
+        @test length(calls) == 1
+        expr = only(calls)
+        @test singleton_type(argextype(expr.args[4], src)) === Core.Intrinsics.add_int
+    end
+    @testset "modifyop is resolved but not atomicrmw-elgible" begin
+        src = code_typed(Tuple{Atomic{Float64}}) do a
+            modifyproperty!(a, :x, muladd1, 2.0, :monotonic)
+        end |> only |> first
+        calls = filter(x -> isexpr(x, :invoke_modify), src.code)
+        @test length(calls) == 1
+        expr = only(calls)
+        @test (expr.args[1]::MethodInstance).def.name === :muladd1
+    end
+    @testset "modifyop cannot be resolved" begin
+        src = code_typed(Tuple{Atomic{Int},Any}) do a, x
+            @atomic a.x += x
+        end |> only |> first
+        calls = filter(iscall((src, modifyfield!)), src.code)
+        @test length(calls) == 1
+        expr = only(calls)
+        @test singleton_type(argextype(expr.args[4], src)) === +
+    end
+end
+
 # Test for deletion of value-dependent control flow that is apparent
 # at inference time, but hard to delete later.
 function maybe_error_int(x::Int)
