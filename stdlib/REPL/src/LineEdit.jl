@@ -12,6 +12,8 @@ import ..Terminals: raw!, width, height, cmove, getX,
 import Base: ensureroom, show, AnyDict, position
 using Base: something
 
+include("completionmenu.jl")
+
 abstract type TextInterface end                # see interface immediately below
 abstract type ModeState end                    # see interface below
 abstract type HistoryProvider end
@@ -104,7 +106,21 @@ mutable struct PromptState <: ModeState
     last_newline::Float64 # register when last newline was entered
     # this option is to speed up output
     refresh_wait::Union{Timer,Nothing}
+    # current completion; nothing if no completion is running
+    completion_menu::Union{CompletionMenu,Nothing}
 end
+
+# check if completion is running
+iscompleting(s::ModeState) = false  # not completing by default
+iscompleting(s::PromptState) = s.completion_menu !== nothing
+
+# check if completion is selectable (i.e., providing an API to select one among candidates)
+isselectable(s::ModeState) = false
+isselectable(s::PromptState) = iscompleting(s) && isselectable(s.completion_menu)
+
+# stop the current completion
+stop_completion!(s::ModeState) = nothing
+stop_completion!(s::PromptState) = (s.completion_menu = nothing)
 
 struct Modifiers
     shift::Bool
@@ -313,31 +329,6 @@ function common_prefix(completions::Vector{String})
     end
 end
 
-# Show available completions
-function show_completions(s::PromptState, completions::Vector{String})
-    colmax = maximum(map(length, completions))
-    num_cols = max(div(width(terminal(s)), colmax+2), 1)
-    entries_per_col, r = divrem(length(completions), num_cols)
-    entries_per_col += r != 0
-    # skip any lines of input after the cursor
-    cmove_down(terminal(s), input_string_newlines_aftercursor(s))
-    println(terminal(s))
-    for row = 1:entries_per_col
-        for col = 0:num_cols
-            idx = row + col*entries_per_col
-            if idx <= length(completions)
-                cmove_col(terminal(s), (colmax+2)*col+1)
-                print(terminal(s), completions[idx])
-            end
-        end
-        println(terminal(s))
-    end
-    # make space for the prompt
-    for i = 1:input_string_newlines(s)
-        println(terminal(s))
-    end
-end
-
 # Prompt Completions
 function complete_line(s::MIState)
     set_action!(s, :complete_line)
@@ -355,25 +346,66 @@ function complete_line(s::PromptState, repeats::Int)
     if !should_complete
         # should_complete is false for cases where we only want to show
         # a list of possible completions but not complete, e.g. foo(\t
-        show_completions(s, completions)
+        s.completion_menu = BashCompletionMenu(partial, 0, completions)
+        show_completions(s)
     elseif length(completions) == 1
         # Replace word by completion
         prev_pos = position(s)
         push_undo(s)
         edit_splice!(s, (prev_pos - sizeof(partial)) => prev_pos, completions[1])
     else
-        p = common_prefix(completions)
-        if !isempty(p) && p != partial
+        prefix = common_prefix(completions)
+        if !isempty(prefix) && prefix != partial
             # All possible completions share the same prefix, so we might as
             # well complete that
             prev_pos = position(s)
             push_undo(s)
-            edit_splice!(s, (prev_pos - sizeof(partial)) => prev_pos, p)
-        elseif repeats > 0
-            show_completions(s, completions)
+            edit_splice!(s, (prev_pos - sizeof(partial)) => prev_pos, prefix)
+            partial = prefix  # extend partial
+        end
+        # start completion mode; nothing is selected yet
+        pos = position(s) - sizeof(partial)
+        style = Symbol(get(ENV, "JULIA_COMPLETION_STYLE", "fish"))
+        if style == :bash
+            s.completion_menu = BashCompletionMenu(partial, pos, completions)
+            if repeats > 0
+                show_completions(s)
+            end
+        else
+            s.completion_menu = FishCompletionMenu(partial, pos, completions)
+            show_completions(s)
         end
     end
     return true
+end
+
+function refresh_completions(s::PromptState)
+    show_completions(s)
+    menu = s.completion_menu
+    if hasselected(menu)
+        edit_splice!(s, menu.position => position(s), selected(menu))
+        refresh_line(s)
+    end
+end
+
+function show_completions(s::PromptState)
+    # skip input lines after the cursor if needed
+    term = terminal(s)
+    skip = input_string_newlines_aftercursor(s)
+    if skip > 0
+        print(term, "\x1b[$(skip)B")
+    end
+    println(term)
+
+    # show completion menu
+    menu = s.completion_menu
+    available_height = height(term) - (input_string_newlines(s) + 1)
+    menu_height = show_completion_menu(term, menu, width(term), available_height)
+
+    # unwind the cursor position
+    if menu isa FishCompletionMenu
+        print(term, "\x1b[$(skip + menu_height)A", "\x1b[0G")
+    end
 end
 
 function clear_input_area(terminal::AbstractTerminal, s::PromptState)
@@ -1294,6 +1326,41 @@ end
 _edit_indent(buf::IOBuffer, b::Int, num::Int) =
     num >= 0 ? edit_splice!(buf, b => b, ' '^num, rigid_mark=false) :
                edit_splice!(buf, b => (b - num))
+
+
+# Completion operations
+function complete_prev(s::MIState)
+    isselectable(state(s)) || return false
+    select_prev!(state(s).completion_menu)
+    refresh_completions(state(s))
+    return true
+end
+
+function complete_next(s::MIState)
+    isselectable(state(s)) || return false
+    select_next!(state(s).completion_menu)
+    refresh_completions(state(s))
+    return true
+end
+
+function complete_right(s::MIState)
+    isselectable(state(s)) || return false
+    select_right!(state(s).completion_menu)
+    refresh_completions(state(s))
+    return true
+end
+
+function complete_left(s::MIState)
+    isselectable(state(s)) || return false
+    select_left!(state(s).completion_menu)
+    refresh_completions(state(s))
+    return true
+end
+
+function stop_completion(s::MIState)
+    stop_completion!(state(s))
+    print(terminal(s), "\x1b[0J")
+end
 
 
 history_prev(::EmptyHistoryProvider) = ("", false)
@@ -2222,11 +2289,12 @@ end
 const default_keymap =
 AnyDict(
     # Tab
-    '\t' => (s::MIState,o...)->edit_tab(s, true),
+    '\t' => (s::MIState,o...)->complete_next(s) || edit_tab(s, true),
     # Shift-tab
-    "\e[Z" => (s::MIState,o...)->shift_tab_completion(s),
+    "\e[Z" => (s::MIState,o...)->complete_prev(s) || shift_tab_completion(s),
     # Enter
     '\r' => (s::MIState,o...)->begin
+        stop_completion(s)
         if on_enter(s) || (eof(buffer(s)) && s.key_repeats > 1)
             commit_line(s)
             return :done
@@ -2236,13 +2304,17 @@ AnyDict(
     end,
     '\n' => KeyAlias('\r'),
     # Backspace/^H
-    '\b' => (s::MIState,o...) -> is_region_active(s) ? edit_kill_region(s) : edit_backspace(s),
+    '\b' => (s::MIState,o...) -> begin
+        stop_completion(s)
+        is_region_active(s) ? edit_kill_region(s) : edit_backspace(s)
+    end,
     127 => KeyAlias('\b'),
     # Meta Backspace
     "\e\b" => (s::MIState,o...)->edit_delete_prev_word(s),
     "\e\x7f" => "\e\b",
     # ^D
     "^D" => (s::MIState,o...)->begin
+        stop_completion(s)
         if buffer(s).size > 0
             edit_delete(s)
         else
@@ -2253,10 +2325,10 @@ AnyDict(
     "\0" => (s::MIState,o...)->setmark(s),
     "^G" => (s::MIState,o...)->(deactivate_region(s); refresh_line(s)),
     "^X^X" => (s::MIState,o...)->edit_exchange_point_and_mark(s),
-    "^B" => (s::MIState,o...)->edit_move_left(s),
-    "^F" => (s::MIState,o...)->edit_move_right(s),
-    "^P" => (s::MIState,o...)->edit_move_up(s),
-    "^N" => (s::MIState,o...)->edit_move_down(s),
+    "^B" => (s::MIState,o...)->(stop_completion(s); edit_move_left(s)),
+    "^F" => (s::MIState,o...)->(stop_completion(s); edit_move_right(s)),
+    "^P" => (s::MIState,o...)->complete_prev(s) || edit_move_up(s),
+    "^N" => (s::MIState,o...)->complete_next(s) || edit_move_down(s),
     # Meta-Up
     "\e[1;3A" => (s::MIState,o...) -> edit_transpose_lines_up!(s),
     # Meta-Down
@@ -2284,9 +2356,9 @@ AnyDict(
     "^_" => (s::MIState,o...)->edit_undo!(s),
     "\e_" => (s::MIState,o...)->edit_redo!(s),
     # Simply insert it into the buffer by default
-    "*" => (s::MIState,data,c::StringLike)->(edit_insert(s, c)),
-    "^U" => (s::MIState,o...)->edit_kill_line_backwards(s),
-    "^K" => (s::MIState,o...)->edit_kill_line_forwards(s),
+    "*" => (s::MIState,data,c::StringLike)->(stop_completion(s); edit_insert(s, c)),
+    "^U" => (s::MIState,o...)->(stop_completion(s); edit_kill_line_backwards(s)),
+    "^K" => (s::MIState,o...)->(stop_completion(s); edit_kill_line_forwards(s)),
     "^Y" => (s::MIState,o...)->edit_yank(s),
     "\ey" => (s::MIState,o...)->edit_yank_pop(s),
     "\ew" => (s::MIState,o...)->edit_copy_region(s),
@@ -2314,9 +2386,9 @@ AnyDict(
     end,
     "^Z" => (s::MIState,o...)->(return :suspend),
     # Right Arrow
-    "\e[C" => (s::MIState,o...)->edit_move_right(s),
+    "\e[C" => (s::MIState,o...)->complete_right(s) || edit_move_right(s),
     # Left Arrow
-    "\e[D" => (s::MIState,o...)->edit_move_left(s),
+    "\e[D" => (s::MIState,o...)->complete_left(s) || edit_move_left(s),
     # Up Arrow
     "\e[A" => (s::MIState,o...)->edit_move_up(s),
     # Down Arrow
@@ -2393,12 +2465,12 @@ function setup_prefix_keymap(hp::HistoryProvider, parent_prompt::Prompt)
     p = PrefixHistoryPrompt(hp, parent_prompt)
     p.keymap_dict = keymap([prefix_history_keymap])
     pkeymap = AnyDict(
-        "^P" => (s::MIState,o...)->(edit_move_up(s) || enter_prefix_search(s, p, true)),
-        "^N" => (s::MIState,o...)->(edit_move_down(s) || enter_prefix_search(s, p, false)),
+        "^P" => (s::MIState,o...)->complete_prev(s) || edit_move_up(s) || enter_prefix_search(s, p, true),
+        "^N" => (s::MIState,o...)->complete_next(s) || edit_move_down(s) || enter_prefix_search(s, p, false),
         # Up Arrow
-        "\e[A" => (s::MIState,o...)->(edit_move_up(s) || enter_prefix_search(s, p, true)),
+        "\e[A" => (s::MIState,o...)->complete_prev(s) || edit_move_up(s) || enter_prefix_search(s, p, true),
         # Down Arrow
-        "\e[B" => (s::MIState,o...)->(edit_move_down(s) || enter_prefix_search(s, p, false)),
+        "\e[B" => (s::MIState,o...)->complete_next(s) || edit_move_down(s) || enter_prefix_search(s, p, false),
     )
     return (p, pkeymap)
 end
@@ -2488,7 +2560,7 @@ run_interface(::Prompt) = nothing
 
 init_state(terminal, prompt::Prompt) =
     PromptState(terminal, prompt, IOBuffer(), :off, IOBuffer[], 1, InputAreaState(1, 1),
-                #=indent(spaces)=# -1, Threads.SpinLock(), 0.0, -Inf, nothing)
+                #=indent(spaces)=# -1, Threads.SpinLock(), 0.0, -Inf, nothing, nothing)
 
 function init_state(terminal, m::ModalInterface)
     s = MIState(m, m.modes[1], false, IdDict{Any,Any}())
