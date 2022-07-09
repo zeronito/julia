@@ -2282,7 +2282,7 @@ julia> Vector{Float64}(undef, 3)
  6.90966e-310
 ```
 """
-Vector{T}(::UndefInitializer, n)
+Vector{T}(undef::UndefInitializer, n) where T
 
 """
     Vector{T}(nothing, m)
@@ -2299,7 +2299,7 @@ julia> Vector{Union{Nothing, String}}(nothing, 2)
  nothing
 ```
 """
-Vector{T}(::Nothing, n)
+Vector{T}(::Nothing, n) where T
 
 """
     Vector{T}(missing, m)
@@ -2316,7 +2316,7 @@ julia> Vector{Union{Missing, String}}(missing, 2)
  missing
 ```
 """
-Vector{T}(::Missing, n)
+Vector{T}(::Missing, n) where T
 
 """
     Matrix{T}(undef, m, n)
@@ -2336,7 +2336,7 @@ julia> similar(ans, Int32, 2, 2)
          1  1936748399
 ```
 """
-Matrix{T}(::UndefInitializer, m, n)
+Matrix{T}(::UndefInitializer, m, n) where T
 
 """
     Matrix{T}(nothing, m, n)
@@ -2353,7 +2353,7 @@ julia> Matrix{Union{Nothing, String}}(nothing, 2, 3)
  nothing  nothing  nothing
 ```
 """
-Matrix{T}(::Nothing, m, n)
+Matrix{T}(::Nothing, m, n) where T
 
 """
     Matrix{T}(missing, m, n)
@@ -2370,7 +2370,7 @@ julia> Matrix{Union{Missing, String}}(missing, 2, 3)
  missing  missing  missing
 ```
 """
-Matrix{T}(::Missing, m, n)
+Matrix{T}(::Missing, m, n) where T
 
 """
     Array{T}(undef, dims)
@@ -2405,7 +2405,7 @@ julia> similar(B, 2, 4, 1) # use typeof(B), and the given size
  0.0           2.26703e-314  2.26708e-314  0.0
 ```
 """
-Array{T,N}(::UndefInitializer, dims)
+Array{T,N}(::UndefInitializer, dims) where {T,N}
 
 """
     Array{T}(nothing, dims)
@@ -2428,7 +2428,7 @@ julia> Array{Union{Nothing, Int}}(nothing, 2, 3)
  nothing  nothing  nothing
 ```
 """
-Array{T,N}(::Nothing, dims)
+Array{T,N}(::Nothing, dims) where {T,N}
 
 
 """
@@ -2452,7 +2452,7 @@ julia> Array{Union{Missing, Int}}(missing, 2, 3)
  missing  missing  missing
 ```
 """
-Array{T,N}(::Missing, dims)
+Array{T,N}(::Missing, dims) where {T,N}
 
 """
     UndefInitializer
@@ -2497,7 +2497,7 @@ undef
 
 Creates a null pointer to type `T`.
 """
-Ptr{T}()
+Ptr{T}() where T
 
 """
     +(x, y...)
@@ -2794,7 +2794,7 @@ Tuple
 
 Construct a named tuple with the given `names` (a tuple of Symbols) from a tuple of values.
 """
-NamedTuple{names}(args::Tuple)
+NamedTuple{names}(args::Tuple) where names
 
 """
     NamedTuple{names,T}(args::Tuple)
@@ -2802,7 +2802,7 @@ NamedTuple{names}(args::Tuple)
 Construct a named tuple with the given `names` (a tuple of Symbols) and field types `T`
 (a `Tuple` type) from a tuple of values.
 """
-NamedTuple{names,T}(args::Tuple)
+NamedTuple{names,T}(args::Tuple) where {names,T}
 
 """
     NamedTuple{names}(nt::NamedTuple)
@@ -2810,7 +2810,7 @@ NamedTuple{names,T}(args::Tuple)
 Construct a named tuple by selecting fields in `names` (a tuple of Symbols) from
 another named tuple.
 """
-NamedTuple{names}(nt::NamedTuple)
+NamedTuple{names}(nt::NamedTuple) where names
 
 """
     NamedTuple(itr)
