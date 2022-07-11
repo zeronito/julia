@@ -706,6 +706,8 @@ export
 # channels
     take!,
     put!,
+    maybetake!,
+    tryput!,
     isready,
     fetch,
     bind,
