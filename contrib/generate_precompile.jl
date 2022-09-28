@@ -135,6 +135,7 @@ if have_repl
     """
 end
 
+if false
 Artifacts = get(Base.loaded_modules,
           Base.PkgId(Base.UUID("56f22d72-fd6d-98f1-02f0-08ddc0907c33"), "Artifacts"),
           nothing)
@@ -151,6 +152,7 @@ if Artifacts !== nothing
     best_platform = select_platform(Dict(p => triplet(p) for p in platforms))
     dlopen("libjulia$(Base.isdebugbuild() ? "-debug" : "")", RTLD_LAZY | RTLD_DEEPBIND)
     """
+end
 end
 
 FileWatching = get(Base.loaded_modules,
