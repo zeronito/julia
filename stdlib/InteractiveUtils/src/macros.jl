@@ -227,13 +227,6 @@ function gen_call_with_extracted_types(__module__, fcn, ex0, kws=Expr[])
                                 is_row_first,
                                 map(esc, xs)...), kws...)
             end
-
-            if any(a -> isa(a, Expr) && (a.head === :nrow || a.head === :row), args)
-                
-            else
-                extract_elements.(args)
-                return Expr(:call, error, "hello 2 $(args), $xs")
-            end
         else
             for (head, f) in (:ref => Base.getindex, :hcat => Base.hcat, :(.) => Base.getproperty, :vect => Base.vect, Symbol("'") => Base.adjoint, :typed_hcat => Base.typed_hcat, :string => string)
                 if ex0.head === head
