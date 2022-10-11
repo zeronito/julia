@@ -239,7 +239,7 @@ module A
 end
 
 # PR #23075
-@testset "versioninfo" begin
+@testset "versioninfo()" begin
     # check that versioninfo(io; verbose=true) doesn't error, produces some output
     mktempdir() do dir
         buf = PipeBuffer()
@@ -254,6 +254,26 @@ end
         @test  occursin("Environment:", read(setenv(`$exename -e 'using InteractiveUtils; versioninfo()'`,
                                                     String["JULIA_CPU_THREADS=1"]), String))
     end
+end
+
+@testset "diagnostics()" begin
+    # check that `InteractiveUtils.diagnostics(io)` doesn't error, produces some output
+    buf = PipeBuffer()
+    InteractiveUtils.diagnostics(buf)
+    output = read(buf, String)
+    @test occursin("Julia Version $VERSION", output)
+    @test occursin("Environment:", output)
+end
+
+@testset "stdlib_diagnostics()" begin
+    # check that `InteractiveUtils.stdlib_diagnostics(io)` doesn't error, produces some output
+    buf = PipeBuffer()
+    InteractiveUtils.stdlib_diagnostics(buf)
+    output = read(buf, String)
+    @test occursin("Julia Version $VERSION", output)
+    @test occursin("Environment:", output)
+
+    InteractiveUtils.stdlib_diagnostics(stdout) # TODO: delete this line before merging the PR
 end
 
 const curmod = @__MODULE__
