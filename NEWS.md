@@ -79,6 +79,7 @@ New library functions
 * New function `stack(x)` which generalises `reduce(hcat, x::Vector{<:Vector})` to any dimensionality,
   and allows any iterators of iterators. Method `stack(f, x)` generalises `mapreduce(f, hcat, x)` and
   is efficient. ([#43334])
+* `block(x)` assembles an array from an array of arrays. ([#46003])
 
 Library changes
 ---------------

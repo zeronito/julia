@@ -446,6 +446,7 @@ export
     sortslices,
     dropdims,
     stack,
+    block,
     step,
     stride,
     strides,

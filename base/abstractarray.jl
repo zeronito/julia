@@ -2872,6 +2872,244 @@ _ensure_array(x) = 1:0  # passed to similar, makes stack's output an Array
 
 _empty_stack(_...) = throw(ArgumentError("`stack` on an empty collection is not allowed"))
 
+"""
+    block(array_of_arrays)
+
+Concatenates a multi-dimensional array of arrays into a single array, treating
+the input as a block array. The dimensions of the sub-arrays must match accordingly.
+
+See also: [`hvncat`](@ref).
+
+!!! compat "Julia 1.9"
+    This function requires at least Julia 1.9.
+
+# Examples
+
+Simple concatenation of vectors
+
+```jldoctest
+julia> reduce(hcat, [[1,2,3], [4,5,6]])
+3×2 Matrix{Int64}:
+ 1  4
+ 2  5
+ 3  6
+
+julia> block(reshape([[1,2,3], [4,5,6]], 1, :))
+6-element Vector{Int64}:
+ 1  4
+ 2  5
+ 3  6
+
+julia> block([[1,2,3], [4,5,6]])
+6-element Vector{Int64}:
+ 1
+ 2
+ 3
+ 4
+ 5
+ 6
+
+julia> vcat([1,2,3]', [4,5,6]')
+3×2 Matrix{Int64}:
+ 1  2  3
+ 4  5  6
+
+julia> block([[1,2,3]', [4,5,6]'])
+2×3 Matrix{Int64}:
+ 1  2  3
+ 4  5  6
+
+julia> block([[1,2,3], [4,5,6]]')
+1×6 Matrix{Int64}:
+ 1  2  3  4  5  6
+```
+
+"Flatmap" behavior.
+```jldoctest
+julia> block(n -> -n:2:n, 1:3)
+9-element Vector{Int64}:
+ -1
+  1
+ -2
+  0
+  2
+ -3
+ -1
+  1
+  3
+```
+
+Image montage.
+
+```
+using TestImages, ImageView
+myimages = ["cameraman" "plastic_bubbles_he_512" "woman_darkhair"; "resolution_test_512" "pirate" "walkbridge"]
+imshow(block(testimage.(myimages)))
+```
+
+# Extended Help
+
+## More Examples
+
+Higher-dimension concatenation.
+
+```jldoctest
+julia> block([1 2]) do n reshape(n*4-3:n*4, 2, 2) end
+2×4 Matrix{Int64}:
+ 1  3  5  7
+ 2  4  6  8
+
+julia> block([1, 2]) do n reshape(n*4-3:n*4, 2, 2) end
+4×2 Matrix{Int64}:
+ 1  3
+ 2  4
+ 5  7
+ 6  8
+
+julia> block([1;;; 2;;;]) do n reshape(n*4-3:n*4, 2, 2) end
+2×2×2 Array{Int64, 3}:
+[:, :, 1] =
+ 1  3
+ 2  4
+
+[:, :, 2] =
+ 5  7
+ 6  8
+```
+
+Relationship to `eachcol` and `eachrow`.
+
+```jldoctest
+julia> m = reshape(1:15,3,5)
+3×5 reshape(::UnitRange{Int64}, 3, 5) with eltype Int64:
+ 1  4  7  10  13
+ 2  5  8  11  14
+ 3  6  9  12  15
+
+julia> lol = eachcol(m) |> collect
+5-element Vector{SubArray{Int64, 1, Base.ReshapedArray{Int64, 2, UnitRange{Int64}, Tuple{}}, Tuple{Base.Slice{Base.OneTo{Int64}}, Int64}, true}}:
+ [1, 2, 3]
+ [4, 5, 6]
+ [7, 8, 9]
+ [10, 11, 12]
+ [13, 14, 15]
+
+julia> block(lol)
+15-element Vector{Int64}:
+  1
+  2
+  3
+  4
+  5
+  6
+  7
+  8
+  9
+ 10
+ 11
+ 12
+ 13
+ 14
+ 15
+
+julia> block(lol')
+1×15 Matrix{Int64}:
+ 1  2  3  4  5  6  7  8  9  10  11  12  13  14  15
+
+julia> block(permutedims(lol))
+3×5 Matrix{Int64}:
+ 1  4  7  10  13
+ 2  5  8  11  14
+ 3  6  9  12  15
+
+julia> lol = eachrow(m) |> collect
+3-element Vector{SubArray{Int64, 1, Base.ReshapedArray{Int64, 2, UnitRange{Int64}, Tuple{}}, Tuple{Int64, Base.Slice{Base.OneTo{Int64}}}, true}}:
+ [1, 4, 7, 10, 13]
+ [2, 5, 8, 11, 14]
+ [3, 6, 9, 12, 15]
+
+julia> block(permutedims(lol))
+5×3 Matrix{Int64}:
+  1   2   3
+  4   5   6
+  7   8   9
+ 10  11  12
+ 13  14  15
+
+julia> block(permutedims.(lol))
+3×5 Matrix{Int64}:
+ 1  4  7  10  13
+ 2  5  8  11  14
+ 3  6  9  12  15
+```
+
+Non-uniform array shapes with 3 dimensions.
+
+```jldoctest
+julia> myarrays = map([(j,k,l) for j in 1:2, k in 1:2, l in 1:2]) do (jkl)
+           reshape(1:prod((jkl)), jkl...)
+       end
+2×2×2 Array{Base.ReshapedArray{Int64, 3, UnitRange{Int64}, Tuple{}}, 3}:
+[:, :, 1] =
+ [1;;;]     [1 2;;;]
+ [1; 2;;;]  [1 3; 2 4;;;]
+
+[:, :, 2] =
+ [1;;; 2]        [1 2;;; 3 4]
+ [1; 2;;; 3; 4]  [1 3; 2 4;;; 5 7; 6 8]
+
+julia> arr = block(myarrays)
+3×3×3 Array{Int64, 3}:
+[:, :, 1] =
+ 1  1  2
+ 1  1  3
+ 2  2  4
+
+[:, :, 2] =
+ 1  1  2
+ 1  1  3
+ 2  2  4
+
+[:, :, 3] =
+ 2  3  4
+ 3  5  7
+ 4  6  8
+
+julia> arr == block([(j,k,l) for j in 1:2, k in 1:2, l in 1:2]) do (jkl)
+           reshape(1:prod((jkl)), jkl...)
+       end
+true
+```
+"""
+block(a::AbstractArray{<:AbstractArray}) = Base.hvncat(size(a), false, a...)
+
+"""
+    block(f, c...)
+
+Equivalent to block(map(f, c...)). Implements flatmap behavior.
+
+!!! compat "Julia 1.9"
+    This function requires at least Julia 1.9.
+
+# Example
+```jldoctest
+julia> Zn = block(n -> -n:2:n, 1:3)
+9-element Vector{Int64}:
+ -1
+  1
+ -2
+  0
+  2
+ -3
+ -1
+  1
+  3
+
+julia> Zn == [x for n in 1:3 for x in -n:2:n]
+true
+```
+"""
+block(f, c...) = block(map(f, c...))
 
 ## Reductions and accumulates ##
 
