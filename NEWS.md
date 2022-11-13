@@ -102,6 +102,8 @@ Library changes
 Standard library changes
 ------------------------
 
+* `keys`, `keytype`, and `eachindex` can be applied to instances of `Ref` ([#42544])
+
 #### Package Manager
 
 #### LinearAlgebra
