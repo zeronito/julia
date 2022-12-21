@@ -135,6 +135,7 @@ firstindex(t::NamedTuple) = 1
 lastindex(t::NamedTuple) = nfields(t)
 getindex(t::NamedTuple, i::Int) = getfield(t, i)
 getindex(t::NamedTuple, i::Symbol) = getfield(t, i)
+getindex(t::NamedTuple, ::Colon) = t
 @inline getindex(t::NamedTuple, idxs::Tuple{Vararg{Symbol}}) = NamedTuple{idxs}(t)
 @inline getindex(t::NamedTuple, idxs::AbstractVector{Symbol}) = NamedTuple{Tuple(idxs)}(t)
 indexed_iterate(t::NamedTuple, i::Int, state=1) = (getfield(t, i), i+1)
@@ -423,7 +424,7 @@ macro NamedTuple(ex)
     return :(NamedTuple{($(vars...),), Tuple{$(types...)}})
 end
 
-function split_rest(t::NamedTuple{names}, n::Int, st...) where {names}
+@constprop :aggressive function split_rest(t::NamedTuple{names}, n::Int, st...) where {names}
     _check_length_split_rest(length(t), n)
     names_front, names_last_n = split_rest(names, n, st...)
     return NamedTuple{names_front}(t), NamedTuple{names_last_n}(t)
