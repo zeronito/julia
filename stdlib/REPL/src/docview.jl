@@ -18,6 +18,11 @@ using InteractiveUtils: subtypes
 using Unicode: normalize
 
 ## Help mode ##
+# Big picture as of 2022-06-18:
+# help?> → helpmode → _helpmode → @repl → repl → _repl → Core.@doc → Core.atdoc → Docs.docm → lookup_doc → doc (→ summarize)
+# In addition to `_repl`, `repl` also calls `repl_search`, `repl_latex` and optionally `repl_corrections`.
+# For data fields, `_repl` calls `fielddoc` instead of `Core.@doc`.
+# Many of the function recurse to handle special cases.
 
 # This is split into helpmode and _helpmode to easier unittest _helpmode
 helpmode(io::IO, line::AbstractString, mod::Module=Main) = :($REPL.insert_hlines($io, $(REPL._helpmode(io, line, mod))))
@@ -148,63 +153,6 @@ end
 
 _trimdocs(md, brief::Bool) = md, false
 
-"""
-    Docs.doc(binding, sig)
-
-Return all documentation that matches both `binding` and `sig`.
-
-If `getdoc` returns a non-`nothing` result on the value of the binding, then a
-dynamic docstring is returned instead of one based on the binding itself.
-"""
-function doc(binding::Binding, sig::Type = Union{})
-    if defined(binding)
-        result = getdoc(resolve(binding), sig)
-        result === nothing || return result
-    end
-    results, groups = DocStr[], MultiDoc[]
-    # Lookup `binding` and `sig` for matches in all modules of the docsystem.
-    for mod in modules
-        dict = meta(mod)
-        if haskey(dict, binding)
-            multidoc = dict[binding]
-            push!(groups, multidoc)
-            for msig in multidoc.order
-                sig <: msig && push!(results, multidoc.docs[msig])
-            end
-        end
-    end
-    if isempty(groups)
-        # When no `MultiDoc`s are found that match `binding` then we check whether `binding`
-        # is an alias of some other `Binding`. When it is we then re-run `doc` with that
-        # `Binding`, otherwise if it's not an alias then we generate a summary for the
-        # `binding` and display that to the user instead.
-        alias = aliasof(binding)
-        alias == binding ? summarize(alias, sig) : doc(alias, sig)
-    else
-        # There was at least one match for `binding` while searching. If there weren't any
-        # matches for `sig` then we concatenate *all* the docs from the matching `Binding`s.
-        if isempty(results)
-            for group in groups, each in group.order
-                push!(results, group.docs[each])
-            end
-        end
-        # Get parsed docs and concatenate them.
-        md = catdoc(mapany(parsedoc, results)...)
-        # Save metadata in the generated markdown.
-        if isa(md, Markdown.MD)
-            md.meta[:results] = results
-            md.meta[:binding] = binding
-            md.meta[:typesig] = sig
-        end
-        return md
-    end
-end
-
-# Some additional convenience `doc` methods that take objects rather than `Binding`s.
-doc(obj::UnionAll) = doc(Base.unwrap_unionall(obj))
-doc(object, sig::Type = Union{}) = doc(aliasof(object, typeof(object)), sig)
-doc(object, sig...)              = doc(object, Tuple{sig...})
-
 function lookup_doc(ex)
     if isa(ex, Expr) && ex.head !== :(.) && Base.isoperator(ex.head)
         # handle syntactic operators, e.g. +=, ::, .=
@@ -242,15 +190,84 @@ function lookup_doc(ex)
     end
 end
 
+"""
+    Docs.doc(binding, sig)
+
+Return all documentation that matches both `binding` and `sig`.
+
+If `getdoc` returns a non-`nothing` result on the value of the binding, then a
+dynamic docstring is returned instead of one based on the binding itself.
+"""
+function doc(binding::Binding, sig::Type = Union{})
+    if defined(binding)
+        result = getdoc(resolve(binding), sig)
+        result === nothing || return result
+    end
+    results, groups = DocStr[], MultiDoc[]
+    # Lookup `binding` and `sig` for matches in all modules of the docsystem.
+    for mod in modules
+        dict = meta(mod)
+        if haskey(dict, binding)
+            multidoc = dict[binding]
+            push!(groups, multidoc)
+            for msig in multidoc.order
+                sig <: msig && push!(results, multidoc.docs[msig])
+            end
+        end
+    end
+    if isempty(groups)
+        # When no `MultiDoc`s are found that match `binding` then we check whether `binding`
+        # is an alias of some other `Binding`. When it is we then re-run `doc` with that
+        # `Binding`, otherwise we generate a summary for it. This only works for types, functions,
+        # and modules. In the other cases, we re-run `doc` for the type of the `binding`.
+        alias = aliasof(binding)
+        if alias != binding
+            return doc(alias, sig)
+        elseif (summary = summarize(alias, sig)) !== nothing
+            return summary
+        else
+            doc_of_type = doc(typeof(resolve(binding)), sig)
+            heading = Markdown.parse("`$(binding)` is of type `$(typeof(resolve(binding)))`")
+            result = catdoc(heading, doc_of_type)
+            result.meta = doc_of_type.meta
+            return result
+        end
+    else
+        # There was at least one match for `binding` while searching. If there weren't any
+        # matches for `sig` then we concatenate *all* the docs from the matching `Binding`s.
+        if isempty(results)
+            for group in groups, each in group.order
+                push!(results, group.docs[each])
+            end
+        end
+        # Get parsed docs and concatenate them.
+        md = catdoc(mapany(parsedoc, results)...)
+        # Save metadata in the generated markdown.
+        if isa(md, Markdown.MD)
+            md.meta[:results] = results
+            md.meta[:binding] = binding
+            md.meta[:typesig] = sig
+        end
+        return md
+    end
+end
+
+# Some additional convenience `doc` methods that take objects rather than `Binding`s.
+doc(obj::UnionAll) = doc(Base.unwrap_unionall(obj))
+doc(object, sig::Type = Union{}) = doc(aliasof(object, typeof(object)), sig)
+doc(object, sig...)              = doc(object, Tuple{sig...})
+
 # Object Summaries.
 # =================
 
+# summarize Functions, Types and Modules. For everything else return nothing.
 function summarize(binding::Binding, sig)
     io = IOBuffer()
     if defined(binding)
         binding_res = resolve(binding)
         !isa(binding_res, Module) && println(io, "No documentation found.\n")
-        summarize(io, binding_res, binding)
+        io = summarize!(io, binding_res, binding)
+        io === nothing && return nothing
     else
         println(io, "No documentation found.\n")
         quot = any(isspace, sprint(print, binding)) ? "'" : ""
@@ -264,13 +281,14 @@ function summarize(binding::Binding, sig)
     return md
 end
 
-function summarize(io::IO, λ::Function, binding::Binding)
+function summarize!(io::IO, λ::Function, binding::Binding)
     kind = startswith(string(binding.var), '@') ? "macro" : "`Function`"
     println(io, "`", binding, "` is a ", kind, ".")
     println(io, "```\n", methods(λ), "\n```")
+    io
 end
 
-function summarize(io::IO, TT::Type, binding::Binding)
+function summarize!(io::IO, TT::Type, binding::Binding)
     println(io, "# Summary")
     T = Base.unwrap_unionall(TT)
     if T isa DataType
@@ -317,6 +335,7 @@ function summarize(io::IO, TT::Type, binding::Binding)
     else # unreachable?
         println(io, "`", binding, "` is of type `", typeof(TT), "`.\n")
     end
+    io
 end
 
 function find_readme(m::Module)::Union{String, Nothing}
@@ -335,7 +354,7 @@ function find_readme(m::Module)::Union{String, Nothing}
     end
     return nothing
 end
-function summarize(io::IO, m::Module, binding::Binding; nlines::Int = 200)
+function summarize!(io::IO, m::Module, binding::Binding; nlines::Int = 200)
     readme_path = find_readme(m)
     if isnothing(readme_path)
         println(io, "No docstring or readme file found for module `$m`.\n")
@@ -360,13 +379,10 @@ function summarize(io::IO, m::Module, binding::Binding; nlines::Int = 200)
         end
         length(readme_lines) > nlines && println(io, "\n[output truncated to first $nlines lines]")
     end
+    io
 end
 
-function summarize(io::IO, @nospecialize(T), binding::Binding)
-    T = typeof(T)
-    println(io, "`", binding, "` is of type `", T, "`.\n")
-    summarize(io, T, binding)
-end
+summarize!(io::IO, @nospecialize(T), binding::Binding) = nothing
 
 # repl search and completions for help
 
