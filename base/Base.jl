@@ -260,6 +260,7 @@ include("io.jl")
 include("iobuffer.jl")
 
 # strings & printing
+include("scratch_buffer.jl")
 include("intfuncs.jl")
 include("strings/strings.jl")
 include("regex.jl")
@@ -517,6 +518,7 @@ function __init__()
     # Base library init
     reinit_stdio()
     Multimedia.reinit_displays() # since Multimedia.displays uses stdout as fallback
+    init_scratch_buffers()
     # initialize loading
     init_depot_path()
     init_load_path()
