@@ -47,6 +47,7 @@ supertype(T::UnionAll) = (@_total_meta; UnionAll(T.var, supertype(T.body)))
 
 """
     ==(x, y)
+    ⩵(x, y)
 
 Generic equality operator. Falls back to [`===`](@ref).
 Should be implemented for all types with a notion of equality, based on the abstract value
@@ -77,6 +78,7 @@ If some type defines `==`, [`isequal`](@ref), and [`isless`](@ref) then it shoul
 also implement [`<`](@ref) to ensure consistency of comparisons.
 """
 ==
+const ⩵ = ==
 
 """
     isequal(x, y)
@@ -249,7 +251,7 @@ isunordered(x::Missing) = true
 
 """
     !=(x, y)
-    ≠(x,y)
+    ≠(x, y)
 
 Not-equals comparison operator. Always gives the opposite answer as [`==`](@ref).
 
@@ -270,8 +272,9 @@ false
 const ≠ = !=
 
 """
-    ===(x,y) -> Bool
-    ≡(x,y) -> Bool
+    ===(x, y) -> Bool
+    ≡(x, y) -> Bool
+    ⩶(x, y) -> Bool
 
 Determine whether `x` and `y` are identical, in the sense that no program could distinguish
 them. First the types of `x` and `y` are compared. If those are identical, mutable objects
@@ -295,10 +298,11 @@ true
 """
 ===
 const ≡ = ===
+const ⩶ = ===
 
 """
     !==(x, y)
-    ≢(x,y)
+    ≢(x, y)
 
 Always gives the opposite answer as [`===`](@ref).
 
@@ -343,6 +347,28 @@ false
 <(x, y) = isless(x, y)
 
 """
+    ≮(x, y)
+
+Not-less-than comparison operator. Always gives the opposite answer as [`<`](@ref).
+
+# Examples
+```jldoctest
+julia> 'a' ≮ 'b'
+false
+
+julia> "abc" ≮ "abd"
+false
+
+julia> 5 ≮ 3
+true
+```
+
+!!! compat "Julia 1.8"
+    The ≮ operator requires at least Julia 1.8.
+"""
+≮(x, y) = !<(x, y)
+
+"""
     >(x, y)
 
 Greater-than comparison operator. Falls back to `y < x`.
@@ -369,8 +395,34 @@ true
 >(x, y) = y < x
 
 """
+    ≯(x, y)
+
+Not-greater-than comparison operator. Always gives the opposite answer as [`>`](@ref).
+
+# Examples
+```jldoctest
+julia> 'a' ≯ 'b'
+true
+
+julia> 1 ≯ 3 ≯ 7
+true
+
+julia> "abc" ≯ "abd"
+true
+
+julia> 5 ≯ 3
+false
+```
+
+!!! compat "Julia 1.8"
+    The ≯ operator requires at least Julia 1.8.
+"""
+≯(x, y) = !>(x, y)
+
+"""
     <=(x, y)
-    ≤(x,y)
+    ≤(x, y)
+    ⩽(x, y)
 
 Less-than-or-equals comparison operator. Falls back to `(x < y) | (x == y)`.
 
@@ -388,13 +440,43 @@ true
 julia> 5 <= 3
 false
 ```
+
+!!! compat "Julia 1.8"
+    The ⩽ operator requires at least Julia 1.8.
 """
 <=(x, y) = (x < y) | (x == y)
 const ≤ = <=
+const ⩽ = ≤
+
+"""
+    ≰(x, y)
+
+Not-less-than-or-equals comparison operator. Always gives the opposite answer as [`≤`](@ref).
+
+# Examples
+```jldoctest
+julia> 'a' ≰ 'b'
+false
+
+julia> 9 ≰ 8 ≰ 7
+true
+
+julia> "abc" ≰ "abc"
+false
+
+julia> 5 ≰ 3
+true
+```
+
+!!! compat "Julia 1.8"
+    The ≰ operator requires at least Julia 1.8.
+"""
+≰(x, y) = !≤(x, y)
 
 """
     >=(x, y)
-    ≥(x,y)
+    ≥(x, y)
+    ⩾(x, y)
 
 Greater-than-or-equals comparison operator. Falls back to `y <= x`.
 
@@ -412,9 +494,38 @@ true
 julia> 5 >= 3
 true
 ```
+
+!!! compat "Julia 1.8"
+    The ⩾ operator requires at least Julia 1.8.
 """
 >=(x, y) = (y <= x)
 const ≥ = >=
+const ⩾ = ≥
+
+"""
+    ≱(x, y)
+
+Not-greater-than-or-equals comparison operator. Always gives the opposite answer as [`≥`](@ref).
+
+# Examples
+```jldoctest
+julia> 'a' ≱ 'b'
+true
+
+julia> 3 ≱ 5 ≱ 7
+true
+
+julia> "abc" ≱ "abc"
+false
+
+julia> 5 ≱ 3
+false
+```
+
+!!! compat "Julia 1.8"
+    The ≱ operator requires at least Julia 1.8.
+"""
+≱(x, y) = !≥(x, y)
 
 # this definition allows Number types to implement < instead of isless,
 # which is more idiomatic:
@@ -1173,6 +1284,19 @@ used to implement specialized methods.
 >=(x) = Fix2(>=, x)
 
 """
+    ≱(x)
+
+Create a function that compares its argument to `x` using [`≱`](@ref), i.e.
+a function equivalent to `y -> y ≱ x`.
+The returned function is of type `Base.Fix2{typeof(≱)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.8"
+    This functionality requires at least Julia 1.8.
+"""
+≱(x) = Fix2(≱, x)
+
+"""
     <=(x)
 
 Create a function that compares its argument to `x` using [`<=`](@ref), i.e.
@@ -1184,6 +1308,19 @@ used to implement specialized methods.
     This functionality requires at least Julia 1.2.
 """
 <=(x) = Fix2(<=, x)
+
+"""
+    ≰(x)
+
+Create a function that compares its argument to `x` using [`≰`](@ref), i.e.
+a function equivalent to `y -> y ≰ x`.
+The returned function is of type `Base.Fix2{typeof(≰)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.8"
+    This functionality requires at least Julia 1.8.
+"""
+≰(x) = Fix2(≰, x)
 
 """
     >(x)
@@ -1199,6 +1336,19 @@ used to implement specialized methods.
 >(x) = Fix2(>, x)
 
 """
+    ≯(x)
+
+Create a function that compares its argument to `x` using [`≯`](@ref), i.e.
+a function equivalent to `y -> y ≯ x`.
+The returned function is of type `Base.Fix2{typeof(≯)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.8"
+    This functionality requires at least Julia 1.8.
+"""
+≯(x) = Fix2(≯, x)
+
+"""
     <(x)
 
 Create a function that compares its argument to `x` using [`<`](@ref), i.e.
@@ -1210,6 +1360,19 @@ used to implement specialized methods.
     This functionality requires at least Julia 1.2.
 """
 <(x) = Fix2(<, x)
+
+"""
+    ≮(x)
+
+Create a function that compares its argument to `x` using [`≮`](@ref), i.e.
+a function equivalent to `y -> y ≮ x`.
+The returned function is of type `Base.Fix2{typeof(≮)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.8"
+    This functionality requires at least Julia 1.8.
+"""
+≮(x) = Fix2(≮, x)
 
 """
     Splat(f)
