@@ -272,7 +272,7 @@ function print_method_signature(io::IO, f, arg_types_param, kwargs)
     print(io, str)
 end
 
-function unwrap_kwargs(f, args, arg_types, is_arg_types)
+function unwrap_kwcall(f, args, arg_types, is_arg_types)
     arg_types_param::SimpleVector = arg_types.parameters
     kwargs = ()
     if f === Core.kwcall && !is_arg_types
@@ -295,7 +295,7 @@ function showerror(io::IO, ex::MethodError)
         return showerror_ambiguous(io, meth, f, arg_types)
     end
     print(io, "MethodError: ")
-    f, args, arg_types_param, kwargs = unwrap_kwargs(f, ex.args, arg_types, is_arg_types)
+    f, args, arg_types_param, kwargs = unwrap_kwcall(f, ex.args, arg_types, is_arg_types)
     ex = MethodError(f, args, ex.world)
     ft = typeof(f)
     show_candidates = true
