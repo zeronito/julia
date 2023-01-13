@@ -58,6 +58,7 @@ typedef struct {
     int8_t strip_metadata;
     int8_t strip_ir;
     uint64_t heap_size_hint;
+    uint8_t alloc;
 } jl_options_t;
 
 #endif

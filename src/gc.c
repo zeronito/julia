@@ -3,14 +3,25 @@
 #include "gc.h"
 #include "julia_gcext.h"
 #include "julia_assert.h"
+#include <stdlib.h>
 #ifdef __GLIBC__
 #include <malloc.h> // for malloc_trim
 #endif
-
+#include "mimalloc.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
+//malloc fptrs
 
+void *(*malloc_fun)(size_t);
+void *(*calloc_fun)(size_t, size_t);
+void *(*realloc_fun)(void *, size_t);
+int (*posix_memalign_fun)(void **, size_t , size_t );
+#if defined(_OS_WINDOWS_)
+void *(*malloc_aligned_fun)(size_t, size_t);
+void *(*realloc_aligned_fun)(void *,size_t, size_t);
+#endif
+void (*free_fun)(void *);
 // Linked list of callback functions
 
 typedef void (*jl_gc_cb_func_t)(void);
@@ -224,32 +235,35 @@ void jl_gc_wait_for_the_world(jl_ptls_t* gc_all_tls_states, int gc_n_threads)
 
 void jl_gc_wait_for_the_world(jl_ptls_t* gc_all_tls_states, int gc_n_threads);
 
+
 // malloc wrappers, aligned allocation
 
 #if defined(_OS_WINDOWS_)
 STATIC_INLINE void *jl_malloc_aligned(size_t sz, size_t align)
 {
-    return _aligned_malloc(sz ? sz : 1, align);
+    return malloc_aligned_fun(sz ? sz : 1, align);
 }
 STATIC_INLINE void *jl_realloc_aligned(void *p, size_t sz, size_t oldsz,
                                        size_t align)
 {
     (void)oldsz;
-    return _aligned_realloc(p, sz ? sz : 1, align);
+    return realloc_aligned_fun(p, sz ? sz : 1, align);
 }
 STATIC_INLINE void jl_free_aligned(void *p) JL_NOTSAFEPOINT
 {
-    _aligned_free(p);
+    free_fun(p);
 }
 #else
+
+
 STATIC_INLINE void *jl_malloc_aligned(size_t sz, size_t align)
 {
 #if defined(_P64) || defined(__APPLE__)
     if (align <= 16)
-        return malloc(sz);
+        return malloc_fun(sz);
 #endif
     void *ptr;
-    if (posix_memalign(&ptr, align, sz))
+    if (posix_memalign_fun(&ptr, align, sz))
         return NULL;
     return ptr;
 }
@@ -258,18 +272,18 @@ STATIC_INLINE void *jl_realloc_aligned(void *d, size_t sz, size_t oldsz,
 {
 #if defined(_P64) || defined(__APPLE__)
     if (align <= 16)
-        return realloc(d, sz);
+        return realloc_fun(d, sz);
 #endif
     void *b = jl_malloc_aligned(sz, align);
     if (b != NULL) {
         memcpy(b, d, oldsz > sz ? sz : oldsz);
-        free(d);
+        free_fun(d);
     }
     return b;
 }
 STATIC_INLINE void jl_free_aligned(void *p) JL_NOTSAFEPOINT
 {
-    free(p);
+    free_fun(p);
 }
 #endif
 #define malloc_cache_align(sz) jl_malloc_aligned(sz, JL_CACHE_BYTE_ALIGNMENT)
@@ -1221,10 +1235,12 @@ size_t jl_array_nbytes(jl_array_t *a) JL_NOTSAFEPOINT
 
 static void jl_gc_free_array(jl_array_t *a) JL_NOTSAFEPOINT
 {
-    if (a->flags.how == 2) {
+    if (a->flags.how == 2 || __unlikely(a->flags.how == 4)) {
         char *d = (char*)a->data - a->offset*a->elsize;
         if (a->flags.isaligned)
             jl_free_aligned(d);
+        else if (a->flags.how == 2)
+            free_fun(d);
         else
             free(d);
         gc_num.freed += jl_array_nbytes(a);
@@ -1250,7 +1266,7 @@ static void sweep_malloced_arrays(void) JL_NOTSAFEPOINT
             }
             else {
                 *pma = nxt;
-                assert(ma->a->flags.how == 2);
+                assert(ma->a->flags.how == 2 || ma->a->flags.how == 4);
                 jl_gc_free_array(ma->a);
                 ma->next = ptls2->heap.mafreelist;
                 ptls2->heap.mafreelist = ma;
@@ -3628,6 +3644,33 @@ void jl_gc_init(void)
 
     if (high_water_mark < max_total_memory)
        max_total_memory = high_water_mark;
+    if (jl_options.alloc == JL_OPTIONS_USE_MIMALLOC) {
+        mi_option_set(mi_option_large_os_pages , 1);
+        mi_option_set(mi_option_page_reset , 1);
+        mi_option_set(mi_option_decommit_delay , 4000);
+        malloc_fun = &mi_malloc;
+        calloc_fun = &mi_calloc;
+        realloc_fun = &mi_realloc;
+
+        #if defined(_OS_WINDOWS_)
+        malloc_aligned_fun = &mi_malloc_aligned;
+        realloc_aligned_fun = &mi_realloc_aligned;
+        #else
+        posix_memalign_fun = &mi_posix_memalign;
+        #endif
+        free_fun = &mi_free;
+    } else {
+        malloc_fun = &malloc;
+        calloc_fun = &calloc;
+        realloc_fun = &realloc;
+        #if defined(_OS_WINDOWS_)
+        malloc_aligned_fun = &_aligned_malloc;
+        realloc_aligned_fun = & _aligned_realloc;
+        #else
+        posix_memalign_fun = &posix_memalign;
+        #endif
+        free_fun = &free;
+    }
 
     jl_gc_mark_sp_t sp = {NULL, NULL, NULL, NULL};
     gc_mark_loop(NULL, sp);
@@ -3662,7 +3705,7 @@ JL_DLLEXPORT void *jl_gc_counted_malloc(size_t sz)
         jl_atomic_store_relaxed(&ptls->gc_num.malloc,
             jl_atomic_load_relaxed(&ptls->gc_num.malloc) + 1);
     }
-    return malloc(sz);
+    return malloc_fun(sz);
 }
 
 JL_DLLEXPORT void *jl_gc_counted_calloc(size_t nm, size_t sz)
@@ -3677,14 +3720,14 @@ JL_DLLEXPORT void *jl_gc_counted_calloc(size_t nm, size_t sz)
         jl_atomic_store_relaxed(&ptls->gc_num.malloc,
             jl_atomic_load_relaxed(&ptls->gc_num.malloc) + 1);
     }
-    return calloc(nm, sz);
+    return calloc_fun(nm, sz);
 }
 
 JL_DLLEXPORT void jl_gc_counted_free_with_size(void *p, size_t sz)
 {
     jl_gcframe_t **pgcstack = jl_get_pgcstack();
     jl_task_t *ct = jl_current_task;
-    free(p);
+    free_fun(p);
     if (pgcstack && ct->world_age) {
         jl_ptls_t ptls = ct->ptls;
         jl_atomic_store_relaxed(&ptls->gc_num.freed,
@@ -3710,7 +3753,7 @@ JL_DLLEXPORT void *jl_gc_counted_realloc_with_old_size(void *p, size_t old, size
         jl_atomic_store_relaxed(&ptls->gc_num.realloc,
             jl_atomic_load_relaxed(&ptls->gc_num.realloc) + 1);
     }
-    return realloc(p, sz);
+    return realloc_fun(p, sz);
 }
 
 // allocation wrappers that save the size of allocations, to allow using
@@ -3830,7 +3873,7 @@ static void *gc_managed_realloc_(jl_ptls_t ptls, void *d, size_t sz, size_t olds
     if (isaligned)
         b = realloc_cache_align(d, allocsz, oldsz);
     else
-        b = realloc(d, allocsz);
+        b = realloc_fun(d, allocsz);
     if (b == NULL)
         jl_throw(jl_memory_exception);
 #ifdef _OS_WINDOWS_
