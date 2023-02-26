@@ -158,7 +158,7 @@ seed!(rng::Union{TaskLocalRNG, Xoshiro}, seed::Integer) = seed!(rng, make_seed(s
 
 @inline function rand(rng::Union{TaskLocalRNG, Xoshiro}, ::SamplerType{UInt128})
     first = rand(rng, UInt64)
-    second = rand(rng,UInt64)
+    second = rand(rng, UInt64)
     second + UInt128(first)<<64
 end
 
