@@ -3,6 +3,7 @@
 using Test
 using Base.Threads
 using Base.Threads: SpinLock, threadpoolsize
+using LinearAlgebra: peakflops
 
 # for cfunction_closure
 include("testenv.jl")
@@ -1066,4 +1067,12 @@ end
         Base.ACTIVE_PROJECT[] = old_act_proj
         popfirst!(LOAD_PATH)
     end
+end
+
+@testset "CPU time counter" begin
+    t = Threads.@spawn begin
+        peakflops()
+    end
+    wait(t)
+    @test t.cpu_time_ns > 0
 end
