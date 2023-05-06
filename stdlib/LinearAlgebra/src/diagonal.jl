@@ -96,6 +96,11 @@ julia> diag(A, 2)
 ```
 """
 Diagonal(A::AbstractMatrix) = Diagonal(diag(A))
+Diagonal{T}(A::AbstractMatrix) where T = Diagonal{T}(diag(A))
+function convert(::Type{T}, A::AbstractMatrix) where T<:Diagonal
+    checksquare(A)
+    isdiag(A) ? T(A) : throw(InexactError(:convert, T, A))
+end
 
 Diagonal(D::Diagonal) = D
 Diagonal{T}(D::Diagonal{T}) where {T} = D
@@ -281,15 +286,11 @@ end
 rmul!(A::AbstractMatrix, D::Diagonal) = @inline mul!(A, A, D)
 lmul!(D::Diagonal, B::AbstractVecOrMat) = @inline mul!(B, D, B)
 
-function *(A::AdjOrTransAbsMat, D::Diagonal)
+function (*)(A::AdjOrTransAbsMat, D::Diagonal)
     Ac = copy_similar(A, promote_op(*, eltype(A), eltype(D.diag)))
     rmul!(Ac, D)
 end
-
-*(D::Diagonal, adjQ::Adjoint{<:Any,<:Union{QRCompactWYQ,QRPackedQ}}) =
-    rmul!(Array{promote_type(eltype(D), eltype(adjQ))}(D), adjQ)
-
-function *(D::Diagonal, A::AdjOrTransAbsMat)
+function (*)(D::Diagonal, A::AdjOrTransAbsMat)
     Ac = copy_similar(A, promote_op(*, eltype(A), eltype(D.diag)))
     lmul!(D, Ac)
 end
@@ -384,21 +385,23 @@ function (*)(Da::Diagonal, A::AbstractMatrix, Db::Diagonal)
     return broadcast(*, Da.diag, A, permutedims(Db.diag))
 end
 
+function (*)(Da::Diagonal, Db::Diagonal, Dc::Diagonal)
+    _muldiag_size_check(Da, Db)
+    _muldiag_size_check(Db, Dc)
+    return Diagonal(Da.diag .* Db.diag .* Dc.diag)
+end
+
 # Get ambiguous method if try to unify AbstractVector/AbstractMatrix here using AbstractVecOrMat
 @inline mul!(out::AbstractVector, D::Diagonal, V::AbstractVector, alpha::Number, beta::Number) =
     _muldiag!(out, D, V, alpha, beta)
 @inline mul!(out::AbstractMatrix, D::Diagonal, B::AbstractMatrix, alpha::Number, beta::Number) =
     _muldiag!(out, D, B, alpha, beta)
-@inline mul!(out::AbstractMatrix, D::Diagonal, B::Adjoint{<:Any,<:AbstractVecOrMat},
-             alpha::Number, beta::Number) = _muldiag!(out, D, B, alpha, beta)
-@inline mul!(out::AbstractMatrix, D::Diagonal, B::Transpose{<:Any,<:AbstractVecOrMat},
+@inline mul!(out::AbstractMatrix, D::Diagonal, B::AdjOrTrans{<:Any,<:AbstractVecOrMat},
              alpha::Number, beta::Number) = _muldiag!(out, D, B, alpha, beta)
 
 @inline mul!(out::AbstractMatrix, A::AbstractMatrix, D::Diagonal, alpha::Number, beta::Number) =
     _muldiag!(out, A, D, alpha, beta)
-@inline mul!(out::AbstractMatrix, A::Adjoint{<:Any,<:AbstractVecOrMat}, D::Diagonal,
-             alpha::Number, beta::Number) = _muldiag!(out, A, D, alpha, beta)
-@inline mul!(out::AbstractMatrix, A::Transpose{<:Any,<:AbstractVecOrMat}, D::Diagonal,
+@inline mul!(out::AbstractMatrix, A::AdjOrTrans{<:Any,<:AbstractVecOrMat}, D::Diagonal,
              alpha::Number, beta::Number) = _muldiag!(out, A, D, alpha, beta)
 @inline mul!(C::Diagonal, Da::Diagonal, Db::Diagonal, alpha::Number, beta::Number) =
     _muldiag!(C, Da, Db, alpha, beta)
@@ -668,7 +671,8 @@ end
 conj(D::Diagonal) = Diagonal(conj(D.diag))
 transpose(D::Diagonal{<:Number}) = D
 transpose(D::Diagonal) = Diagonal(transpose.(D.diag))
-adjoint(D::Diagonal{<:Number}) = conj(D)
+adjoint(D::Diagonal{<:Number}) = Diagonal(vec(adjoint(D.diag)))
+adjoint(D::Diagonal{<:Number,<:Base.ReshapedArray{<:Number,1,<:Adjoint}}) = Diagonal(adjoint(parent(D.diag)))
 adjoint(D::Diagonal) = Diagonal(adjoint.(D.diag))
 permutedims(D::Diagonal) = D
 permutedims(D::Diagonal, perm) = (Base.checkdims_perm(D, D, perm); D)

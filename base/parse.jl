@@ -36,6 +36,7 @@ julia> parse(Complex{Float64}, "3.2e-1 + 4.5im")
 ```
 """
 parse(T::Type, str; base = Int)
+parse(::Type{Union{}}, slurp...; kwargs...) = error("cannot parse a value as Union{}")
 
 function parse(::Type{T}, c::AbstractChar; base::Integer = 10) where T<:Integer
     a::Int = (base <= 36 ? 10 : 36)
@@ -90,8 +91,8 @@ function parseint_preamble(signed::Bool, base::Int, s::AbstractString, startpos:
 end
 
 # '0':'9' -> 0:9
-# 'A':'Z' -> 10:26
-# 'a':'z' -> 10:26 if base <= 36, 36:62 otherwise
+# 'A':'Z' -> 10:35
+# 'a':'z' -> 10:35 if base <= 36, 36:61 otherwise
 # input outside of that is mapped to base
 @inline function __convert_digit(_c::UInt32, base::UInt32)
     _0 = UInt32('0')
@@ -251,6 +252,7 @@ function parse(::Type{T}, s::AbstractString; base::Union{Nothing,Integer} = noth
     convert(T, tryparse_internal(T, s, firstindex(s), lastindex(s),
                                  base===nothing ? 0 : check_valid_base(base), true))
 end
+tryparse(::Type{Union{}}, slurp...; kwargs...) = error("cannot parse a value as Union{}")
 
 ## string to float functions ##
 
