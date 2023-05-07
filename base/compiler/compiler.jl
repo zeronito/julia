@@ -140,6 +140,7 @@ include("compiler/cicache.jl")
 include("compiler/methodtable.jl")
 include("compiler/effects.jl")
 include("compiler/types.jl")
+include("compiler/profilers/profilers.jl")
 include("compiler/utilities.jl")
 include("compiler/validation.jl")
 
