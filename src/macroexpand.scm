@@ -385,11 +385,16 @@
            ((parameters)
             (cons 'parameters
                   (map (lambda (x)
-                         ;; `x` by itself after ; means `x=x`
-                         (let ((x (if (and (not inarg) (symbol? x))
-                                      `(kw ,x ,x)
-                                      x)))
-                           (resolve-expansion-vars- x env m parent-scope #f)))
+                         (if (and inarg (try-arg-name x))
+                             (let ((resolved (resolve-expansion-vars- x env m parent-scope inarg)))
+                                  (if (equal? resolved x)
+                                      x
+                                      `(renamed ,resolved ,(arg-name x))))
+                             ;; `x` by itself after ; means `x=x`
+                             (let ((x (if (and (not inarg) (symbol? x))
+                                          `(kw ,x ,x)
+                                          x)))
+                               (resolve-expansion-vars- x env m parent-scope inarg))))
                        (cdr e))))
 
            ((->)
@@ -401,9 +406,10 @@
                 ;; in (kw x 1) inside an arglist, the x isn't actually a kwarg
                 `(,(car e) ,(resolve-in-function-lhs (cadr e) env m parent-scope inarg)
                   ,(resolve-expansion-vars-with-new-env (caddr e) env m parent-scope inarg))
-                `(,(car e) ,@(map (lambda (x)
+                `(,(car e) ,(resolve-expansion-vars-with-new-env (cadr e) env m parent-scope #t)
+                           ,@(map (lambda (x)
                                     (resolve-expansion-vars-with-new-env x env m parent-scope inarg))
-                                  (cdr e)))))
+                                  (cddr e)))))
 
            ((kw)
             (cond
