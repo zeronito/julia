@@ -70,6 +70,9 @@ Standard library changes
 
 #### LinearAlgebra
 
+* The `Eigen` type now supports more methods, such as matrix functions
+  (which return `Eigen` objects), adjoints and matrix-vector product.
+  `inv(::Eigen)` now produces an `Eigen` type instead of a matrix ([#48549]).
 * `AbstractQ` no longer subtypes to `AbstractMatrix`. Moreover, `adjoint(Q::AbstractQ)`
   no longer wraps `Q` in an `Adjoint` type, but instead in an `AdjointQ`, that itself
   subtypes `AbstractQ`. This change accounts for the fact that typically `AbstractQ`

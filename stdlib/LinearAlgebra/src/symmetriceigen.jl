@@ -6,7 +6,7 @@ eigencopy_oftype(A::Symmetric, S) = Symmetric(copy_similar(A, S), sym_uplo(A.upl
 
 # Eigensolvers for symmetric and Hermitian matrices
 eigen!(A::RealHermSymComplexHerm{<:BlasReal,<:StridedMatrix}; sortby::Union{Function,Nothing}=nothing) =
-    Eigen(sorteig!(LAPACK.syevr!('V', 'A', A.uplo, A.data, 0.0, 0.0, 0, 0, -1.0)..., sortby)...)
+    Eigen(sorteig!(LAPACK.syevr!('V', 'A', A.uplo, A.data, 0.0, 0.0, 0, 0, -1.0)..., sortby)..., true)
 
 function eigen(A::RealHermSymComplexHerm; sortby::Union{Function,Nothing}=nothing)
     S = eigtype(eltype(A))
@@ -14,7 +14,7 @@ function eigen(A::RealHermSymComplexHerm; sortby::Union{Function,Nothing}=nothin
 end
 
 eigen!(A::RealHermSymComplexHerm{<:BlasReal,<:StridedMatrix}, irange::UnitRange) =
-    Eigen(LAPACK.syevr!('V', 'I', A.uplo, A.data, 0.0, 0.0, irange.start, irange.stop, -1.0)...)
+    Eigen(LAPACK.syevr!('V', 'I', A.uplo, A.data, 0.0, 0.0, irange.start, irange.stop, -1.0)..., true)
 
 """
     eigen(A::Union{SymTridiagonal, Hermitian, Symmetric}, irange::UnitRange) -> Eigen
@@ -22,10 +22,6 @@ eigen!(A::RealHermSymComplexHerm{<:BlasReal,<:StridedMatrix}, irange::UnitRange)
 Compute the eigenvalue decomposition of `A`, returning an [`Eigen`](@ref) factorization object `F`
 which contains the eigenvalues in `F.values` and the eigenvectors in the columns of the
 matrix `F.vectors`. (The `k`th eigenvector can be obtained from the slice `F.vectors[:, k]`.)
-
-Iterating the decomposition produces the components `F.values` and `F.vectors`.
-
-The following functions are available for `Eigen` objects: [`inv`](@ref), [`det`](@ref), and [`isposdef`](@ref).
 
 The [`UnitRange`](@ref) `irange` specifies indices of the sorted eigenvalues to search for.
 
@@ -39,7 +35,7 @@ function eigen(A::RealHermSymComplexHerm, irange::UnitRange)
 end
 
 eigen!(A::RealHermSymComplexHerm{T,<:StridedMatrix}, vl::Real, vh::Real) where {T<:BlasReal} =
-    Eigen(LAPACK.syevr!('V', 'V', A.uplo, A.data, convert(T, vl), convert(T, vh), 0, 0, -1.0)...)
+    Eigen(LAPACK.syevr!('V', 'V', A.uplo, A.data, convert(T, vl), convert(T, vh), 0, 0, -1.0)..., true)
 
 """
     eigen(A::Union{SymTridiagonal, Hermitian, Symmetric}, vl::Real, vu::Real) -> Eigen
@@ -47,10 +43,6 @@ eigen!(A::RealHermSymComplexHerm{T,<:StridedMatrix}, vl::Real, vh::Real) where {
 Compute the eigenvalue decomposition of `A`, returning an [`Eigen`](@ref) factorization object `F`
 which contains the eigenvalues in `F.values` and the eigenvectors in the columns of the
 matrix `F.vectors`. (The `k`th eigenvector can be obtained from the slice `F.vectors[:, k]`.)
-
-Iterating the decomposition produces the components `F.values` and `F.vectors`.
-
-The following functions are available for `Eigen` objects: [`inv`](@ref), [`det`](@ref), and [`isposdef`](@ref).
 
 `vl` is the lower bound of the window of eigenvalues to search for, and `vu` is the upper bound.
 
