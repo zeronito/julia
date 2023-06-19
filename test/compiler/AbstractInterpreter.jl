@@ -43,8 +43,8 @@ end |> !Core.Compiler.is_nonoverlayed
 end |> !Core.Compiler.is_nonoverlayed
 
 # account for overlay possibility in unanalyzed matching method
-callstrange(::Nothing) = Core.compilerbarrier(:type, nothing) # trigger inference bail out
 callstrange(::Float64) = strangesin(x)
+callstrange(::Nothing) = Core.compilerbarrier(:type, nothing) # trigger inference bail out
 callstrange_entry(x) = callstrange(x) # needs to be defined here because of world age
 let interp = MTOverlayInterp(Set{Any}())
     matches = Core.Compiler.findall(Tuple{typeof(callstrange),Any}, Core.Compiler.method_table(interp)).matches
@@ -348,3 +348,8 @@ let NoinlineModule = Module()
         @test count(iscall((src, inlined_usually)), src.code) == 0
     end
 end
+
+# Make sure that Core.Compiler has enough NamedTuple infrastructure
+# to properly give error messages for basic kwargs...
+Core.eval(Core.Compiler, quote f(;a=1) = a end)
+@test_throws MethodError Core.Compiler.f(;b=2)

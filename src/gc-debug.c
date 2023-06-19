@@ -369,10 +369,10 @@ static void gc_verify_tags_page(jl_gc_pagemeta_t *pg)
         if (!in_freelist) {
             jl_value_t *dt = jl_typeof(jl_valueof(v));
             if (dt != (jl_value_t*)jl_buff_tag &&
-                    // the following are used by the deserializer to invalidate objects
-                    v->header != 0x10 && v->header != 0x20 &&
-                    v->header != 0x30 && v->header != 0x40 &&
-                    v->header != 0x50 && v->header != 0x60) {
+                    // the following may be use (by the deserializer) to invalidate objects
+                    v->header != 0xf10 && v->header != 0xf20 &&
+                    v->header != 0xf30 && v->header != 0xf40 &&
+                    v->header != 0xf50 && v->header != 0xf60) {
                 assert(jl_typeof(dt) == (jl_value_t*)jl_datatype_type);
             }
         }
@@ -580,14 +580,6 @@ JL_NO_ASAN static void gc_scrub_range(char *low, char *high)
         // Make sure the sweep rebuild the freelist
         pg->has_marked = 1;
         pg->has_young = 1;
-        // Find the age bit
-        char *page_begin = gc_page_data(tag) + GC_PAGE_OFFSET;
-        int obj_id = (((char*)tag) - page_begin) / osize;
-        uint32_t *ages = pg->ages + obj_id / 32;
-        // Force this to be a young object to save some memory
-        // (especially on 32bit where it's more likely to have pointer-like
-        //  bit patterns)
-        *ages &= ~(1 << (obj_id % 32));
         memset(tag, 0xff, osize);
         // set mark to GC_MARKED (young and marked)
         tag->bits.gc = GC_MARKED;
@@ -996,7 +988,7 @@ void gc_time_sweep_pause(uint64_t gc_end_t, int64_t actual_allocd,
                    "(%.2f ms in post_mark) %s | next in %" PRId64 " kB\n",
                    jl_ns2ms(sweep_pause), live_bytes / 1024,
                    gc_num.freed / 1024, estimate_freed / 1024,
-                   gc_num.freed - estimate_freed, pct, gc_num.since_sweep / 1024,
+                   gc_num.freed - estimate_freed, pct, gc_num.allocd / 1024,
                    jl_ns2ms(gc_postmark_end - gc_premark_end),
                    sweep_full ? "full" : "quick", -gc_num.allocd / 1024);
 }
