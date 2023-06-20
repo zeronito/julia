@@ -188,6 +188,12 @@
 (define whitespace-newline #f)
 ; enable parsing `where` with high precedence
 (define where-enabled #t)
+; context for underscore anonymous function
+(define underscore-context #t)
+; control underscore generate single expression or a block
+(define underscore-gen-block #t)
+; disable underscore inside lvalue context
+(define underscore-lvalue #f)
 
 (define current-filename 'none)
 
@@ -216,6 +222,62 @@
 (define-macro (with-whitespace-newline . body)
   `(with-bindings ((whitespace-newline #t))
                   ,@body))
+
+;; ops should be #f, #t, 'paren, 'comma
+;; #f (to: #t) means no _ allowed in context, would parsed as is
+;; #t (to: any) means no _ allowed in context, but could create a new context
+;; 'stmt (not-from: #f, to: any) means no _ allowed in context, should be created in subcontext
+;;   the difference between #t and 'stmt is that #t could changes #f, while 'stmt leave #f as is
+;; 'paren means _ could not cross this scope, mostly in explicit (_+1) or (_, 1)
+;; 'comma means _ would unwind if it is the only token in context like in f(_, 1)
+;; note (f(_),1) would unwind to (x->f(x),1)
+(define (make-ctx_ ops s)
+  (cond ((eqv? ops #t) ops)
+        ((eqv? s #f) s)
+        ((or (boolean? ops) (memq ops '(stmt decl))) ops)
+        ; ((boolean? s) (info "invalid internal underscore context status" (vector '() ops s)))
+        (else (vector '() ops s))))
+(define (ctx_:parent s) (and (vector? s) (aref s 2)))
+(define (ctx_:ops s) (and (vector? s) (aref s 1)))
+(define (ctx_:get s) (and (vector? s) (aref s 0)))
+(define (ctx_:add! s ex)
+  (and (vector? s)
+    (let ((old (aref s 0)))
+        (aset! s 0 (cons ex old)))))
+(define (ctx_:pop! s)
+  (and (vector? s)
+    (let ((old (aref s 0)))
+        (and (pair? old)
+             (aset! s 0 (cdr old))
+             (car old)))))
+(define (ctx_:unwind! s)
+  (let ((ex (car (aref s 0))))
+       (aset! s 0 (cdr (aref s 0)))
+       (let ((current s) (parent (aref s 2)))
+          (if (or (not (vector? parent)) (equal? (ctx_:ops current) 'paren))
+              (ctx_:add! current ex)
+              (ctx_:add! parent ex)))))
+
+(define-macro (with-underscore-lvalue ops . body)
+  `(if (or (null? ,ops) (eqv? ,ops underscore-lvalue))
+      (begin ,@body)
+      (with-bindings ((underscore-lvalue ,ops))
+        (if ,ops
+            (with-underscore-context 'stmt ,@body)
+            (with-underscore-context 'paren ,@body)))))
+(define-macro (with-underscore-context ops . body)
+  `(with-bindings ((underscore-context (make-ctx_ ,ops underscore-context)))
+                  (let* ((line-node (line-number-node s))
+                         (ex ,@body)
+                         (args (ctx_:get underscore-context)))
+                        (if (and (length= args 1)
+                                 (is-underscore-symbol? ex)
+                                 (eqv? (get-decl-name ex) (car args)))
+                            (ctx_:unwind! underscore-context)
+                            '())
+                        (if (not (pair? (ctx_:get underscore-context)))
+                            ex
+                            (underscore-block args line-node ex)))))
 
 ;; --- lexer ---
 
@@ -711,20 +773,32 @@
 ;; the principal non-terminals follow, in increasing precedence order
 
 (define (parse-block s (down parse-eq))
+(with-underscore-context 'stmt ; no underscore could cross block
   (parse-Nary s down '(#\newline #\;) 'block
-              (lambda (x) (memq x '(end else elseif catch finally))) #t))
+              (lambda (x) (memq x '(end else elseif catch finally))) #t)))
 
 ;; ";" at the top level produces a sequence of top level expressions
 (define (parse-stmts s)
+(with-underscore-context #t ; no underscore could cross top-level stmts
   (let ((ex (parse-Nary s (lambda (s) (parse-docstring s parse-eq))
                         '(#\;) 'toplevel (lambda (x) (eqv? x #\newline)) #f)))
     ;; check for unparsed junk after an expression
     (let ((t (peek-token s)))
       (if (not (or (eof-object? t) (eqv? t #\newline) (eq? t #f)))
           (error (string "extra token \"" t "\" after end of expression"))))
-    ex))
+    ex)))
 
-(define (parse-eq s) (parse-assignment s parse-comma))
+(define (parse-decls s)
+(with-underscore-context #t ; no underscore could cross top-level stmts
+  (let ((ex (parse-Nary s (lambda (s) (parse-docstring s parse-decl))
+                        '(#\;) 'toplevel (lambda (x) (eqv? x #\newline)) #f)))
+    ;; check for unparsed junk after an expression
+    (let ((t (peek-token s)))
+      (if (not (or (eof-object? t) (eqv? t #\newline) (eq? t #f)))
+          (error (string "extra token \"" t "\" after end of expression"))))
+    ex)))
+
+(define (parse-eq s) (with-underscore-context 'stmt (parse-assignment s parse-comma)))
 
 ;; symbol tokens that do not simply parse to themselves when appearing alone as
 ;; an element of an argument list
@@ -740,10 +814,10 @@
     (if (or (number? t) (and (symbol? t) (not (non-standalone-symbol-token? t))))
         (begin (take-token s)
                (let ((nxt (peek-token s)))
+                 (ts:put-back! s t spc)
                  (if (or (eqv? nxt #\,) (eqv? nxt #\) ) (eqv? nxt #\}) (eqv? nxt #\]))
-                     t
-                     (begin (ts:put-back! s t spc)
-                            (parse-assignment s parse-pair)))))
+                     (with-underscore-context 'comma (parse-atom s))
+                     (parse-assignment s parse-pair))))
         (parse-assignment s parse-pair))))
 
 (define (eventually-call? ex)
@@ -762,6 +836,114 @@
       `(= ,(cadr ex) ,(add-line-number (caddr ex) `(line ,lno ,current-filename)))
       ex))
 
+(define (is-car? ex head)
+  (and (pair? ex) (eqv? (car ex) head)))
+(define (get-decl-name s)
+  (if (and (is-car? s '::))
+      (if (pair? (cdr s)) (cadr s) '()) ; (:: Int) would return '()
+      s))
+(define (is-underscore-symbol? s (in-decl #t))
+  (let ((s (if in-decl (get-decl-name s) s)))
+    (and (symbol? s)
+         (= (string.char (string s) 0) #\#)
+         (= (string-lastchar (string s)) #\_))))
+(define (is-underscore-block? ex)
+  (if (and (is-car? ex '->) (pair? (cdr ex)))
+      (let* ((arg (cadr ex))
+             (body (cddr ex)))
+          (or (is-underscore-symbol? arg)
+              (and (pair? arg) (pair? (cdr arg)) (is-underscore-symbol? (cadr arg))))) ; first arg means all
+      #f))
+(define (underscore-block args line-node ex)
+  (let ((body (if (and underscore-gen-block line-node) `(block ,line-node ,ex) ex)))
+       (if (pair? (cdr args)) ; count > 1
+          `(-> ,(cons 'tuple (reverse args)) ,body)
+          `(-> ,(car args) ,body))))
+(define (deep-map f t)
+  (if (pair? t)
+      (map (lambda (t) (deep-map f t)) t)
+      (f t)))
+(define (revert-underscore-block ex)
+  (define (unpack-block ex)
+    (if (and (is-car? ex 'block))
+        (caddr ex)
+        ex))
+  (if (and (is-car? ex '->) (pair? (cdr ex)))
+      (let* ((arg (cadr ex))
+             (args-decl (if (symbol? arg) (list arg) (cdr arg)))
+             (args (map (lambda (a) (if (symbol? a) a (cadr a))) args-decl))
+             (is-args? (Set args))
+             (body (unpack-block (caddr ex))))
+            (deep-map (lambda (s) (if (is-args? s) '_ s)) body))
+      ex))
+(define is-lvalue-keyword?
+  (Set '(tuple parameters macrocall where)))
+;; when we see `->` in `ex ->` or `=` in `ex =`, we would apply revert-underscore for ex
+;; for `->` revert-current-underscore! would also be applied for special case `_ -> 1`
+;; revert-underscore would take care of all tuple: `(_, 1)`, call `f(_)`,
+;;   kw `(_=b)` (only key but not value here), and also `parameters, where, ::` for parameters
+;;   it shall not apply to anything thinked as right value
+(define (revert-underscore ex)
+  (define (parse-rvalue ex) ; return args (no sort)
+    (cond ((pair? ex) (apply append (map parse-rvalue ex)))
+          ((is-underscore-block? ex) '())
+          ((is-underscore-symbol? ex #f) (list ex))
+          (else '())))
+  (define (revert-rvalue ex args line)
+    (let* ((is-used? (Set (parse-rvalue ex)))
+           (args (filter is-used? args))) ; TODO: not filter when is-used? empty
+         (if (pair? args)
+             (underscore-block args line ex)
+             ex)))
+  (define (unpack-block ex) ; might has line-node
+    (let* ((args (cadr ex))
+           (args (if (is-car? args 'tuple) (cdr args) (list args)))
+           (args (map get-decl-name args))
+           (body (caddr ex)))
+          (if (and (is-car? body 'block))
+              (list args (cadr body) (caddr body))
+              (list args #f body))))
+  (define (revert-lvalue ex firstcall args line)
+    (if (pair? ex)
+        (cond ((is-underscore-block? ex)
+               (let ((block (unpack-block ex)))
+                    (revert-lvalue (caddr block)
+                                   firstcall
+                                   (append (car block) args) ; TODO: sort args here
+                                   (cadr block))))
+
+              ((eqv? (car ex) 'call)
+               (if firstcall
+                   (map (lambda (e) (revert-lvalue e #f args line)) ex)
+                   (revert-rvalue ex args line)))
+
+              ((or (memq (car ex) '(kw =)) ; TODO: consider where here
+                   (and (eqv? (car ex) '::) (pair? (cdr ex))))
+               (let ((lvalue (revert-lvalue (cadr ex) firstcall args line))
+                     (rvalue (map (lambda (e) (revert-rvalue e args line)) (cddr ex)))) ; should be only one
+                    `(,(car ex) ,lvalue ,@rvalue)))
+
+              ((or (is-lvalue-keyword? (car ex)) args)
+               (map (lambda (e) (revert-lvalue e firstcall args line)) ex))
+
+              (else
+               (let ((is-args? (Set args)))
+                    (deep-map (lambda (e) (if (is-args? e) '_ e)) ex)))) ; TODO: curly
+        (cond ((is-underscore-symbol? ex #f) '_)
+              (ex))))
+  (revert-lvalue ex #t '() #f))
+(define (revert-current-underscore! ex)
+  (revert-underscore
+    (if (is-underscore-symbol? ex)
+        (let ((old (ctx_:pop! underscore-context))) ; TODO: map check
+            (cond ((eqv? old ex) '_)
+                  ((eqv? old (get-decl-name ex)) `(:: _ ,@(cddr ex)))
+                  (else (error "internal: pop current error" (info old ex)))))
+        ex)))
+
+(define (parse-assignment-value s down)
+  (with-underscore-lvalue #f (parse-assignment s down)))
+
 (define (parse-assignment s down)
   (let* ((ex (down s))
          (t  (peek-token s)))
@@ -776,15 +958,18 @@
                             ex)
                      (list 'call t ex (parse-assignment s down))))
                 ((eq? t '=)
+                 ;; hack _ in existing ex force to '_
                  ;; insert line/file for short-form function defs, otherwise leave alone
-                 (let ((lno (input-port-line (ts:port s))))
+                 (let* ((ex (revert-current-underscore! ex))
+                        (lno (input-port-line (ts:port s))))
                    (short-form-function-loc
-                    (list t ex (parse-assignment s down)) lno)))
+                    (list t ex (parse-assignment-value s down)) lno)))
                 (else
                  (list t ex (parse-assignment s down))))))))
 
 ; parse-comma is needed for commas outside parens, for example a = b,c
 (define (parse-comma s)
+(with-underscore-context 'stmt
   (let loop ((ex     (list (parse-pair s)))
              (first? #t)
              (t      (peek-token s)))
@@ -799,9 +984,11 @@
         (begin (take-token s)
                (if (eq? (peek-token s) '=) ;; allow x, = ...
                    (loop ex #f (peek-token s))
-                   (loop (cons (parse-pair s) ex) #f (peek-token s)))))))
+                   (loop (cons (parse-pair s) ex) #f (peek-token s))))))))
 
-(define (parse-pair s) (parse-RtoL s parse-cond is-prec-pair? #f parse-pair))
+(define (parse-pair s)
+  (with-underscore-context 'comma
+    (parse-RtoL s parse-cond is-prec-pair? #f parse-pair)))
 
 (define (parse-cond s)
   (let ((ex (parse-arrow s)))
@@ -849,7 +1036,14 @@
             (else ex)))))
 
 (define (parse-pipe< s) (parse-RtoL s parse-pipe> is-prec-pipe<? #f parse-pipe<))
-(define (parse-pipe> s) (parse-LtoR s parse-range is-prec-pipe>?))
+(define (parse-pipe> s)
+  (let loop ((ex (parse-range s))
+             (t  (peek-token s)))
+     (if (is-prec-pipe>? t)
+         (begin (take-token s)
+                (let ((nex (with-underscore-context 'paren (parse-range s))))
+                     (loop (list 'call t ex nex) (peek-token s))))
+         ex)))
 
 ;; parse ranges and postfix ...
 ;; colon is strange; 3 arguments with 2 colons yields one call:
@@ -1114,7 +1308,8 @@
 (define (parse-factor-after s) (parse-RtoL s parse-juxtapose is-prec-power? #f parse-factor-after))
 
 (define (parse-decl s)
-  (parse-decl-with-initial-ex s (parse-call s)))
+  (with-underscore-lvalue #t
+    (parse-decl-with-initial-ex s (parse-call s))))
 
 (define (parse-decl-with-initial-ex s ex)
   (let loop ((ex ex))
@@ -1126,7 +1321,7 @@
          ;; -> is unusual: it binds tightly on the left and
          ;; loosely on the right.
          (let ((lno (line-number-node s)))
-           `(-> ,ex ,(add-line-number (parse-eq* s) lno))))
+           `(-> ,(revert-current-underscore! ex) ,(add-line-number (with-underscore-context 'stmt (parse-eq* s)) lno))))
         (else
          ex)))))
 
@@ -1154,6 +1349,7 @@
         (parse-atom s))))
 
 (define (parse-def s is-func anon)
+(with-underscore-lvalue #t
   (let* ((ex  (parse-unary-prefix s))
          (sig (if (or (and is-func (reserved-word? ex)) (initial-reserved-word? ex))
                   (error (string "invalid name \"" ex "\""))
@@ -1165,7 +1361,7 @@
               sig)))
     (if (eq? (peek-token s) 'where)
         (parse-where-chain s decl-sig)
-        decl-sig)))
+        decl-sig))))
 
 (define (disallowed-space-error lno ex t)
   (error (string "space before \"" t "\" not allowed in \""
@@ -1356,12 +1552,13 @@
       x))
 
 (define (parse-struct-field s)
+(with-underscore-context #f ;; disbale struct field for now
   (let ((tok (peek-token s)))
     ;; allow `const x` only as a struct field
     (if (eq? tok 'const)
         (begin (take-token s)
                `(const ,(parse-eq s)))
-        (parse-eq s))))
+        (parse-eq s)))))
 
 (define (parse-struct-def s mut? word)
   (if (reserved-word? (peek-token s))
@@ -1475,6 +1672,7 @@
        ((function macro)
         (let* ((loc   (line-number-node s))
                (paren (eqv? (require-token s) #\())
+               ; TODO: design context to remove revert
                (sig   (parse-def s (eq? word 'function) paren)))
           (if (and (not paren) (symbol-or-interpolate? sig))
               (begin (if (not (eq? (require-token s) 'end))
@@ -1552,7 +1750,7 @@
                           finalb
                           elseb)
                     (let* ((loc (line-number-node s))
-                           (var (if nl #f (parse-eq* s)))
+                           (var (if nl #f (with-underscore-context #f (parse-eq* s))))
                            (var? (and (not nl) (or (symbol? var)
                                                    (and (length= var 2) (eq? (car var) '$))
                                                    (error (string "invalid syntax \"catch " (deparse var) "\"")))))
@@ -1632,7 +1830,7 @@
    (with-normal-context
     (let ((doargs (if (memv (peek-token s) '(#\newline #\;))
                       '()
-                      (parse-comma-separated s parse-range))))
+                      (with-underscore-context #f (parse-comma-separated s parse-range)))))
       `(-> (tuple ,@doargs)
            ,(begin0 (parse-block s)
                     (expect-end s 'do)))))))
@@ -1755,7 +1953,7 @@
           (begin (take-token s)
                  (peek-token s))
           t)))
-  (let* ((lhs (let ((lhs- (with-space-sensitive (parse-pipe< s))))
+  (let* ((lhs (let ((lhs- (with-underscore-context #f (with-space-sensitive (parse-pipe< s)))))
                 (if (eq? lhs- 'outer)
                     (let ((nxt (peek-token- s)))
                       (if (memq nxt '(= in ∈))
@@ -2517,10 +2715,21 @@
                        (else (list 'quote
                            ;; being inside quote makes `end` non-special again. issue #27690
                            (with-bindings ((end-symbol #f))
-                                          (parse-atom s #f))))))))
+                                          (with-underscore-context #f (parse-atom s #f)))))))))
 
           ;; misplaced =
           ((eq? t '=) (error "unexpected \"=\""))
+
+          ;; underscore
+          ((eq? t '_)
+           (take-token s)
+           (cond ((and (eqv? (peek-token s) #\") (not (ts:space? s)))
+                  t) ; str macro _"a" parsed to @__str "a"
+                 ((and (vector? underscore-context) (not underscore-lvalue))
+                  (let ((ex (named-gensy '_)))
+                       (ctx_:add! underscore-context ex)
+                       ex))  ; switched off in some place like lvalue
+                 (else t)))
 
           ;; identifier
           ((symbol? t)
@@ -2550,7 +2759,8 @@
           ;; parens or tuple
           ((eqv? t #\( )
            (take-token s)
-           (parse-paren s checked))
+           (with-underscore-context 'paren
+              (parse-paren s checked)))
 
           ;; cat expression
           ((eqv? t #\[ )
@@ -2587,6 +2797,7 @@
           ((eqv? t #\@)
            (take-token s)
            (with-space-sensitive
+           (with-underscore-context #f
             (let ((startloc  (line-number-node s))
                   (head (parse-macro-name s)))
               (peek-token s)
@@ -2596,7 +2807,7 @@
                                  ,startloc
                                  ,@(parse-space-separated-exprs s)))
                   (let ((call (parse-call-chain s head #t)))
-                    (macroify-call s call startloc))))))
+                    (macroify-call s call startloc)))))))
           ;; command syntax
           ((eqv? t #\`)
            (take-token s)

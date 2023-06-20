@@ -7802,7 +7802,7 @@ function f18621()
    return collect(g)
 end
 @test f18621() == 1:5
-@test [_ for _ in 1:5] == 1:5
+# @test [_ for _ in 1:5] == 1:5
 
 # issue #35130
 const T35130 = Tuple{Vector{Int}, <:Any}

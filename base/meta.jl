@@ -233,8 +233,8 @@ julia> Meta.parse("(α, β) = 3, 5", 11, greedy=false)
 ```
 """
 function parse(str::AbstractString, pos::Integer; greedy::Bool=true, raise::Bool=true,
-               depwarn::Bool=true)
-    ex, pos = _parse_string(str, "none", 1, pos, greedy ? :statement : :atom)
+               depwarn::Bool=true, sig::Bool=false)
+    ex, pos = _parse_string(str, "none", 1, pos, sig ? :signature : greedy ? :statement : :atom)
     if raise && isa(ex,Expr) && ex.head === :error
         err = ex.args[1]
         if err isa String
@@ -272,8 +272,8 @@ julia> Meta.parse("x = ")
 :(\$(Expr(:incomplete, "incomplete: premature end of input")))
 ```
 """
-function parse(str::AbstractString; raise::Bool=true, depwarn::Bool=true)
-    ex, pos = parse(str, 1, greedy=true, raise=raise, depwarn=depwarn)
+function parse(str::AbstractString; raise::Bool=true, depwarn::Bool=true, sig::Bool=false)
+    ex, pos = parse(str, 1, greedy=true, raise=raise, depwarn=depwarn, sig=sig)
     if isa(ex,Expr) && ex.head === :error
         return ex
     end
