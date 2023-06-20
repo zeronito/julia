@@ -63,7 +63,7 @@ import Core:
     CodeInstance, MethodInstance, CodeInfo
 import .CC:
     InferenceResult, OptimizationState, IRCode, copy as cccopy,
-    @timeit, convert_to_ircode, slot2reg, compact!, ssa_inlining_pass!, sroa_pass!,
+    @zone, convert_to_ircode, slot2reg, compact!, ssa_inlining_pass!, sroa_pass!,
     adce_pass!, type_lift_pass!, JLOptions, verify_ir, verify_linetable
 import .EA: analyze_escapes, ArgEscapeCache, EscapeInfo, EscapeState, is_ipo_profitable
 
@@ -182,15 +182,15 @@ end
 
 function run_passes_with_ea(interp::EscapeAnalyzer, ci::CodeInfo, sv::OptimizationState,
     caller::InferenceResult)
-    @timeit "convert"   ir = convert_to_ircode(ci, sv)
-    @timeit "slot2reg"  ir = slot2reg(ir, ci, sv)
+    @zone "CC: CONVERT\E"   ir = convert_to_ircode(ci, sv)
+    @zone "CC: SLOT2REG\E"  ir = slot2reg(ir, ci, sv)
     # TODO: Domsorting can produce an updated domtree - no need to recompute here
-    @timeit "compact 1" ir = compact!(ir)
+    @zone "CC: COMPACT 1\E" ir = compact!(ir)
     nargs = let def = sv.linfo.def; isa(def, Method) ? Int(def.nargs) : 0; end
     local state
     if is_ipo_profitable(ir, nargs) || caller.linfo.specTypes === interp.entry_tt
         try
-            @timeit "[IPO EA]" begin
+            @zone "CC: [IPO EA]\E" begin
                 state = analyze_escapes(ir, nargs, false, get_escape_cache(interp))
                 cache_escapes!(interp, caller, state, cccopy(ir))
             end
@@ -206,12 +206,12 @@ function run_passes_with_ea(interp::EscapeAnalyzer, ci::CodeInfo, sv::Optimizati
         interp.state = state
         interp.linfo = sv.linfo
     end
-    @timeit "Inlining"  ir = ssa_inlining_pass!(ir, sv.inlining, ci.propagate_inbounds)
-    # @timeit "verify 2" verify_ir(ir)
-    @timeit "compact 2" ir = compact!(ir)
+    @zone "CC: INLINING\E"  ir = ssa_inlining_pass!(ir, sv.inlining, ci.propagate_inbounds)
+    # @zone "CC: VERIFY 2\E" verify_ir(ir)
+    @zone "CC: COMPACT 2\E" ir = compact!(ir)
     if caller.linfo.specTypes === interp.entry_tt && interp.optimize
         try
-            @timeit "[Local EA]" state = analyze_escapes(ir, nargs, true, get_escape_cache(interp))
+            @zone "CC: [LOCAL EA]\E" state = analyze_escapes(ir, nargs, true, get_escape_cache(interp))
         catch err
             @error "error happened within [Local EA], inspect `Main.ir` and `Main.nargs`"
             @eval Main (ir = $ir; nargs = $nargs)
@@ -222,12 +222,12 @@ function run_passes_with_ea(interp::EscapeAnalyzer, ci::CodeInfo, sv::Optimizati
         interp.state = state
         interp.linfo = sv.linfo
     end
-    @timeit "SROA"      ir = sroa_pass!(ir)
-    @timeit "ADCE"      ir = adce_pass!(ir)
-    @timeit "type lift" ir = type_lift_pass!(ir)
-    @timeit "compact 3" ir = compact!(ir)
+    @zone "CC: SROA\E"      ir = sroa_pass!(ir)
+    @zone "CC: ADCE\E"      ir = adce_pass!(ir)
+    @zone "CC: TYPE LIFT\E" ir = type_lift_pass!(ir)
+    @zone "CC: COMPACT 3\E" ir = compact!(ir)
     if JLOptions().debug_level == 2
-        @timeit "verify 3" (verify_ir(ir); verify_linetable(ir.linetable))
+        @zone "CC: VERIFY 3\E" (verify_ir(ir); verify_linetable(ir.linetable))
     end
     return ir
 end
