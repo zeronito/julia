@@ -349,6 +349,7 @@ module IteratorsMD
         end
         return true
     end
+    allassigned(::CartesianIndices) = true
 
     # getindex for a 0D CartesianIndices is necessary for disambiguation
     @propagate_inbounds function Base.getindex(iter::CartesianIndices{0,R}) where {R}
@@ -1584,6 +1585,12 @@ function isassigned(A::AbstractArray, i::Union{Integer, CartesianIndex}...)
             end
         end
     end
+end
+function allassigned(a::AbstractArray)
+    for i in eachindex(a)
+        @inbounds(isassigned(a, i)) || return false
+    end
+    return true
 end
 
 ## permutedims

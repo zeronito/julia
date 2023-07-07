@@ -426,6 +426,7 @@ logabsdet(A::SymTridiagonal; shift::Number=false) = logabsdet(ldlt(A; shift=shif
         return true
     end
 end
+Base.allassigned(A::SymTridiagonal) = allassigned(A.dv) && allassigned(A.ev)
 
 @inline function Base.isstored(A::SymTridiagonal, i::Int, j::Int)
     @boundscheck checkbounds(A, i, j)
@@ -643,6 +644,9 @@ end
     else
         return true
     end
+end
+function Base.isassigned(A::Tridiagonal)
+    allassigned(A.d) && allassigned(A.dl) && allassigned(A.du)
 end
 
 @inline function Base.isstored(A::Tridiagonal, i::Int, j::Int)
