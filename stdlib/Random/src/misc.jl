@@ -182,11 +182,6 @@ julia> randsubseq(rng, 1:8, 0.3)
 randsubseq(A::AbstractArray, p::Real) = randsubseq(default_rng(), A, p)
 
 
-## rand Less Than Masked 52 bits (helper function)
-
-"Return a sampler generating a random `Int` (masked with `mask`) in ``[0, n)``, when `n <= 2^52`."
-ltm52(n::Int, mask::Int=nextpow(2, n)-1) = LessThan(n-1, Masked(mask, UInt52Raw(Int)))
-
 ## shuffle & shuffle!
 
 """
@@ -197,39 +192,22 @@ optionally supplying the random-number generator `rng`.
 
 # Examples
 ```jldoctest
-julia> rng = MersenneTwister(1234);
-
-julia> shuffle!(rng, Vector(1:16))
-16-element Vector{Int64}:
- 16
-  1
- 14
- 12
-  5
- 10
-  4
- 15
- 13
-  3
-  7
-  9
-  6
- 11
-  8
-  2
+julia> shuffle!(Xoshiro(0), Vector(1:6))
+6-element Vector{Int64}:
+ 5
+ 1
+ 2
+ 6
+ 3
+ 4
 ```
 """
-function shuffle!(r::AbstractRNG, a::AbstractArray)
+function shuffle!(rng::AbstractRNG, a::AbstractArray)
     # keep it consistent with `randperm!` and `randcycle!` if possible
     require_one_based_indexing(a)
-    n = length(a)
-    @assert n <= Int64(2)^52
-    n == 0 && return a
-    mask = 3
-    @inbounds for i = 2:n
-        j = 1 + rand(r, ltm52(i, mask))
+    @inbounds for i = 2:length(a)
+        j = rand(rng, 1:i)
         a[i], a[j] = a[j], a[i]
-        i == 1 + mask && (mask = 2 * mask + 1)
     end
     return a
 end
@@ -246,20 +224,14 @@ indices, see [`randperm`](@ref).
 
 # Examples
 ```jldoctest
-julia> rng = MersenneTwister(1234);
-
-julia> shuffle(rng, Vector(1:10))
-10-element Vector{Int64}:
-  2
-  1
-  7
-  9
-  5
- 10
-  4
-  8
-  6
-  3
+julia> shuffle(Xoshiro(0), 1:6)
+6-element Vector{Int64}:
+ 5
+ 1
+ 2
+ 6
+ 3
+ 4
 ```
 """
 shuffle(r::AbstractRNG, a::AbstractArray) = shuffle!(r, copymutable(a))
@@ -286,12 +258,14 @@ To randomly permute an arbitrary vector, see [`shuffle`](@ref) or
 
 # Examples
 ```jldoctest
-julia> randperm(MersenneTwister(1234), 4)
-4-element Vector{Int64}:
- 2
+julia> randperm(Xoshiro(0), 6)
+6-element Vector{Int64}:
+ 5
  1
- 4
+ 2
+ 6
  3
+ 4
 ```
 """
 randperm(r::AbstractRNG, n::T) where {T <: Integer} = randperm!(r, Vector{T}(undef, n))
@@ -307,28 +281,27 @@ optional `rng` argument specifies a random number generator (see
 
 # Examples
 ```jldoctest
-julia> randperm!(MersenneTwister(1234), Vector{Int}(undef, 4))
-4-element Vector{Int64}:
- 2
+julia> randperm!(Xoshiro(0), Vector{Int}(undef, 6))
+6-element Vector{Int64}:
+ 5
  1
- 4
+ 2
+ 6
  3
+ 4
 ```
 """
-function randperm!(r::AbstractRNG, a::Array{<:Integer})
+function randperm!(rng::AbstractRNG, a::Array{<:Integer})
     # keep it consistent with `shuffle!` and `randcycle!` if possible
     n = length(a)
-    @assert n <= Int64(2)^52
     n == 0 && return a
     a[1] = 1
-    mask = 3
     @inbounds for i = 2:n
-        j = 1 + rand(r, ltm52(i, mask))
+        j = rand(rng, 1:i)
         if i != j # a[i] is undef (and could be #undef)
             a[i] = a[j]
         end
         a[j] = i
-        i == 1 + mask && (mask = 2 * mask + 1)
     end
     return a
 end
@@ -351,13 +324,13 @@ The element type of the result is the same as the type of `n`.
 
 # Examples
 ```jldoctest
-julia> randcycle(MersenneTwister(1234), 6)
+julia> randcycle(Xoshiro(0), 6)
 6-element Vector{Int64}:
- 3
  5
+ 1
  4
  6
- 1
+ 3
  2
 ```
 """
@@ -373,28 +346,25 @@ The optional `rng` argument specifies a random number generator, see
 
 # Examples
 ```jldoctest
-julia> randcycle!(MersenneTwister(1234), Vector{Int}(undef, 6))
+julia> randcycle!(Xoshiro(0), Vector{Int}(undef, 6))
 6-element Vector{Int64}:
- 3
  5
+ 1
  4
  6
- 1
+ 3
  2
 ```
 """
-function randcycle!(r::AbstractRNG, a::Array{<:Integer})
+function randcycle!(rng::AbstractRNG, a::Array{<:Integer})
     # keep it consistent with `shuffle!` and `randperm!` if possible
     n = length(a)
-    @assert n <= Int64(2)^52
     n == 0 && return a
     a[1] = 1
-    mask = 3
     @inbounds for i = 2:n
-        j = 1 + rand(r, ltm52(i-1, mask))
+        j = rand(rng, 1:i-1)
         a[i] = a[j]
         a[j] = i
-        i == 1 + mask && (mask = 2 * mask + 1)
     end
     return a
 end
