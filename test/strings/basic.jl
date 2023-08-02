@@ -1382,3 +1382,5 @@ end
         end
     end
 end
+
+@test_throws StringIndexError "α"[2]
