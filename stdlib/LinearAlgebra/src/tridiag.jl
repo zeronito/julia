@@ -119,6 +119,12 @@ SymTridiagonal{T}(S::SymTridiagonal) where {T} =
                    convert(AbstractVector{T}, S.ev)::AbstractVector{T})
 SymTridiagonal(S::SymTridiagonal) = S
 
+_diagview(S::SymTridiagonal) = S.dv
+_ldiagview(S::SymTridiagonal) = _evview(S)
+# Account for symmetrization and transposes for matrix eltypes
+_diagview(A::SymTridiagonal{<:AbstractMatrix}) = @view A[diagind(A)]
+_ldiagview(A::SymTridiagonal{<:AbstractMatrix}) = @view A[diagind(A,-1)]
+
 AbstractMatrix{T}(S::SymTridiagonal) where {T} =
     SymTridiagonal(convert(AbstractVector{T}, S.dv)::AbstractVector{T},
                    convert(AbstractVector{T}, S.ev)::AbstractVector{T})
@@ -174,6 +180,22 @@ ishermitian(S::SymTridiagonal) = isreal(S.dv) && isreal(_evview(S))
 issymmetric(S::SymTridiagonal) = true
 
 tr(S::SymTridiagonal) = sum(S.dv)
+
+function diagzero(A::SymTridiagonal{<:AbstractMatrix{Tel}}, i, j) where {Tel}
+    if i < j
+        xu = similar(A.ev[i], size(A.ev[i],1), size(A.ev[j-1],2))
+        fill!(xu, zero(eltype(xu)))
+        return xu
+    elseif j < i
+        xl = similar(A.ev[j], size(A.ev[j],1), size(A.ev[i-1],2))
+        fill!(xl, zero(eltype(xl)))
+        return copy(transpose(xl))
+    else
+        xd = similar(A.dv[i], size(A.dv[i],1), size(A.dv[j],2))
+        fill!(xd, zero(eltype(xd)))
+        return symmetric(xd, :U)
+    end
+end
 
 function diag(M::SymTridiagonal{T}, n::Integer=0) where T<:Number
     # every branch call similar(..., ::Int) to make sure the
@@ -449,7 +471,7 @@ end
     elseif i + 1 == j
         return @inbounds A.ev[i]
     else
-        return zero(T)
+        return diagzero(A, i, j)
     end
 end
 
@@ -615,6 +637,16 @@ issymmetric(S::Tridiagonal) = all(issymmetric, S.d) && all(Iterators.map((x, y) 
 
 \(A::Adjoint{<:Any,<:Tridiagonal}, B::Adjoint{<:Any,<:AbstractVecOrMat}) = copy(A) \ B
 
+function diagzero(A::Tridiagonal{<:AbstractMatrix{Tel}}, i, j) where {Tel}
+    if i < j
+        return zeros(Tel, size(A.du[i], 1), size(A.du[j-1], 2))
+    elseif j < i
+        return zeros(Tel, size(A.dl[i-1], 1), size(A.dl[j], 2))
+    else
+        return zeros(Tel, size(A.d[i], 1), size(A.d[j], 2))
+    end
+end
+
 function diag(M::Tridiagonal{T}, n::Integer=0) where T
     # every branch call similar(..., ::Int) to make sure the
     # same vector type is returned independent of n
@@ -667,7 +699,7 @@ end
     elseif i + 1 == j
         return @inbounds A.du[i]
     else
-        return zero(T)
+        return diagzero(A, i, j)
     end
 end
 
