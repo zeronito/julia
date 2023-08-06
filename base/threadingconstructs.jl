@@ -249,6 +249,15 @@ For example, the above conditions imply that:
 - Unless the `:static` schedule is used, the value of [`threadid()`](@ref Threads.threadid)
   may change even within a single iteration. See [`Task Migration`](@ref man-task-migration).
 
+The keywords `continue` and `break` can be used in conjuction with `@threads`. They have the following meaning:
+
+- `continue` skips the rest of the current iteration.
+- `break` gives julia freedom to skip any iteration not yet executed. 
+  There is however no guarantee about particular iterations being skipped. 
+  Which iterations exectly are skipped is an implementation detail and scheduler dependent.
+  Typically the loop is subdivided into blocks and a break statement will only skip the remainder
+  of the surrounding block.
+
 ## Schedulers
 
 Without the scheduler argument, the exact scheduling is unspecified and varies across Julia
