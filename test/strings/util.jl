@@ -91,6 +91,26 @@ end
     @test rstrip("ello", ['e','o']) == "ell"
 end
 
+@testset "partition" begin
+    # AbstractString to partition into SubString
+    let v=collect(Iterators.partition("foobars",1))
+    @test v==SubString{String}["f","o","o","b","a","r","s"]
+    end
+
+    let v=collect(Iterators.partition("foobars",2))
+    @test v==SubString{String}["fo","ob","ar","s"]
+    end
+
+    for n in [7,8]
+        @test collect(Iterators.partition("foobars",n))[1]=="foobars"
+    end
+
+    # HOWEVER enumerate explicitly slices String "atoms" so `Chars` are returned
+    let v=collect(Iterators.partition(enumerate("foobars"),1))
+        @test v==Vector{Tuple{Int64, Char}}[[(1, 'f')],[(2, 'o')],[(3, 'o')],[(4, 'b')],[(5, 'a')],[(6, 'r')], [(7, 's')]]
+    end
+end
+
 @testset "rsplit/split" begin
     @test split("foo,bar,baz", 'x') == ["foo,bar,baz"]
     @test split("foo,bar,baz", ',') == ["foo","bar","baz"]
@@ -313,6 +333,28 @@ end
     # Issue 36953
     @test replace("abc", "" => "_", count=1) == "_abc"
 
+    # tests for io::IO API (in addition to internals exercised above):
+    let buf = IOBuffer()
+        replace(buf, "aaa", 'a' => 'z', count=0)
+        replace(buf, "aaa", 'a' => 'z', count=1)
+        replace(buf, "bbb", 'a' => 'z')
+        replace(buf, "aaa", 'a' => 'z')
+        @test String(take!(buf)) == "aaazaabbbzzz"
+    end
+    let tempfile = tempname()
+        try
+            open(tempfile, "w") do f
+                replace(f, "aaa", 'a' => 'z', count=0)
+                replace(f, "aaa", 'a' => 'z', count=1)
+                replace(f, "bbb", 'a' => 'z')
+                replace(f, "aaa", 'a' => 'z')
+                print(f, "\n")
+            end
+            @test read(tempfile, String) == "aaazaabbbzzz\n"
+        finally
+            rm(tempfile, force=true)
+        end
+    end
 end
 
 @testset "replace many" begin

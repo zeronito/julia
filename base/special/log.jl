@@ -155,10 +155,10 @@ logbU(::Type{Float64},::Val{10}) = 0.4342944819032518
 logbL(::Type{Float64},::Val{10}) = 1.098319650216765e-17
 
 # Procedure 1
-# XXX we want to mark :consistent-cy here so that this function can be concrete-folded,
+# XXX we want to mark :noub here so that this function can be concrete-folded,
 # because the effect analysis currently can't prove it in the presence of `@inbounds` or
 # `:boundscheck`, but still the access to `t_log_Float64` is really safe here
-Base.@assume_effects :consistent @inline function log_proc1(y::Float64,mf::Float64,F::Float64,f::Float64,base=Val(:ℯ))
+Base.@assume_effects :consistent :noub @inline function log_proc1(y::Float64,mf::Float64,F::Float64,f::Float64,base=Val(:ℯ))
     jp = unsafe_trunc(Int,128.0*F)-127
 
     ## Steps 1 and 2
@@ -216,10 +216,10 @@ end
 end
 
 # Procedure 1
-# XXX we want to mark :consistent-cy here so that this function can be concrete-folded,
+# XXX we want to mark :noub here so that this function can be concrete-folded,
 # because the effect analysis currently can't prove it in the presence of `@inbounds` or
 # `:boundscheck`, but still the access to `t_log_Float32` is really safe here
-Base.@assume_effects :consistent @inline function log_proc1(y::Float32,mf::Float32,F::Float32,f::Float32,base=Val(:ℯ))
+Base.@assume_effects :consistent :noub @inline function log_proc1(y::Float32,mf::Float32,F::Float32,f::Float32,base=Val(:ℯ))
     jp = unsafe_trunc(Int,128.0f0*F)-127
 
     ## Steps 1 and 2
@@ -367,7 +367,7 @@ function log1p(x::Float64)
     elseif isnan(x)
         NaN
     else
-        throw_complex_domainerror(:log1p, x)
+        throw_complex_domainerror_neg1(:log1p, x)
     end
 end
 
@@ -399,7 +399,7 @@ function log1p(x::Float32)
     elseif isnan(x)
         NaN32
     else
-        throw_complex_domainerror(:log1p, x)
+        throw_complex_domainerror_neg1(:log1p, x)
     end
 end
 
@@ -556,7 +556,7 @@ const t_log_table_compact = (
 end
 
 # Log implementation that returns 2 numbers which sum to give true value with about 68 bits of precision
-# Since `log` only makes sense for positive exponents, we speed up the implimentation by stealing the sign bit
+# Since `log` only makes sense for positive exponents, we speed up the implementation by stealing the sign bit
 # of the input for an extra bit of the exponent which is used to normalize subnormal inputs.
 # Does not normalize results.
 # Adapted and modified from https://github.com/ARM-software/optimized-routines/blob/master/math/pow.c
@@ -575,7 +575,7 @@ function _log_ext(xu)
     t, logctail = getfield(t_log_table_compact, Int(i+1))
     invc, logc = log_tab_unpack(t)
     # Note: invc is j/N or j/N/2 where j is an integer in [N,2N) and
-    # |z/c - 1| < 1/N, so r = z/c - 1 is exactly representible.
+    # |z/c - 1| < 1/N, so r = z/c - 1 is exactly representable.
     r = fma(z, invc, -1.0)
     # k*Ln2 + log(c) + r.
     t1 = muladd(k, 0.6931471805598903, logc) #ln(2) hi part

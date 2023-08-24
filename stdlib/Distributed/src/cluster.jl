@@ -22,7 +22,7 @@ Some are used by the cluster manager to add workers to an already-initialized ho
   * `count` -- the number of workers to be launched on the host
   * `exename` -- the path to the Julia executable on the host, defaults to `"\$(Sys.BINDIR)/julia"` or
     `"\$(Sys.BINDIR)/julia-debug"`
-  * `exeflags` -- flags to use when lauching Julia remotely
+  * `exeflags` -- flags to use when launching Julia remotely
 
 The `userdata` field is used to store information for each worker by external managers.
 
@@ -615,7 +615,7 @@ function create_worker(manager, wconfig)
         end
     end
 
-    # set when the new worker has finshed connections with all other workers
+    # set when the new worker has finished connections with all other workers
     ntfy_oid = RRID()
     rr_ntfy_join = lookup_ref(ntfy_oid)
     rr_ntfy_join.waitingfor = myid()
@@ -1317,6 +1317,28 @@ end
 
 write_cookie(io::IO) = print(io.in, string(cluster_cookie(), "\n"))
 
+function get_threads_spec(opts)
+    if opts.nthreads > 0
+        @assert opts.nthreadpools >= 1
+        @assert opts.nthreads_per_pool != C_NULL
+        thr = "$(unsafe_load(opts.nthreads_per_pool))"
+        if opts.nthreadpools == 2
+            thr = "$(thr),$(unsafe_load(opts.nthreads_per_pool, 2))"
+        end
+        `--threads=$(thr)`
+    else
+        ``
+    end
+end
+
+function get_gcthreads_spec(opts)
+    if opts.nmarkthreads > 0 || opts.nsweepthreads > 0
+        `--gcthreads=$(opts.nmarkthreads),$(opts.nsweepthreads)`
+    else
+        ``
+    end
+end
+
 # Starts workers specified by (-n|--procs) and --machine-file command line options
 function process_opts(opts)
     # startup worker.
@@ -1331,7 +1353,11 @@ function process_opts(opts)
     end
 
     # Propagate --threads to workers
-    exeflags = opts.nthreads > 0 ? `--threads=$(opts.nthreads)` : ``
+    threads = get_threads_spec(opts)
+    # Propagate --gcthreads to workers
+    gcthreads = get_gcthreads_spec(opts)
+
+    exeflags = `$threads $gcthreads`
 
     # add processors
     if opts.nprocs > 0
