@@ -58,13 +58,13 @@ static void eraseInstruction(Instruction &I,
 //Stolen and modified from LICM.cpp
 static void moveInstructionBefore(Instruction &I, Instruction &Dest,
                                   MemorySSAUpdater &MSSAU,
-                                  ScalarEvolution *SE) {
+                                  ScalarEvolution *SE,
+                                  MemorySSA::InsertionPlace Place = MemorySSA::BeforeTerminator) {
   I.moveBefore(&Dest);
   if (MSSAU.getMemorySSA())
     if (MemoryUseOrDef *OldMemAcc = cast_or_null<MemoryUseOrDef>(
             MSSAU.getMemorySSA()->getMemoryAccess(&I)))
-      MSSAU.moveToPlace(OldMemAcc, Dest.getParent(),
-                         MemorySSA::BeforeTerminator);
+      MSSAU.moveToPlace(OldMemAcc, Dest.getParent(), Place);
   if (SE)
     SE->forgetValue(&I);
 }
@@ -134,7 +134,6 @@ struct JuliaLICMPassLegacy : public LoopPass {
             getLoopAnalysisUsage(AU);
         }
 };
-
 struct JuliaLICM : public JuliaPassContext {
     function_ref<DominatorTree &()> GetDT;
     function_ref<LoopInfo &()> GetLI;
@@ -177,7 +176,7 @@ struct JuliaLICM : public JuliaPassContext {
         // Lazy initialization of exit blocks insertion points.
         bool exit_pts_init = false;
         SmallVector<Instruction*, 8> _exit_pts;
-        auto get_exit_pts = [&] () -> ArrayRef<Instruction*> {
+        auto get_exit_pts = [&] () -> MutableArrayRef<Instruction*> {
             if (!exit_pts_init) {
                 exit_pts_init = true;
                 SmallVector<BasicBlock*, 8> exit_bbs;
@@ -242,7 +241,8 @@ struct JuliaLICM : public JuliaPassContext {
                         continue;
                     }
                     ++SunkPreserveEnd;
-                    moveInstructionBefore(*call, *exit_pts[0], MSSAU, SE);
+                    moveInstructionBefore(*call, *exit_pts[0], MSSAU, SE, MemorySSA::Beginning);
+                    exit_pts[0] = call;
                     LLVM_DEBUG(dbgs() << "Sunk gc_preserve_end: " << *call << "\n");
                     REMARK([&](){
                         return OptimizationRemark(DEBUG_TYPE, "Sunk", call)
@@ -251,6 +251,7 @@ struct JuliaLICM : public JuliaPassContext {
                     for (unsigned i = 1; i < exit_pts.size(); i++) {
                         // Clone exit
                         auto CI = CallInst::Create(call, {}, exit_pts[i]);
+                        exit_pts[i] = CI;
                         createNewInstruction(CI, call, MSSAU);
                         LLVM_DEBUG(dbgs() << "Cloned and sunk gc_preserve_end: " << *CI << "\n");
                         REMARK([&](){
@@ -339,6 +340,16 @@ struct JuliaLICM : public JuliaPassContext {
                     });
                     ++HoistedAllocation;
                     moveInstructionBefore(*call, *preheader->getTerminator(), MSSAU, SE);
+                    IRBuilder<> builder(preheader->getTerminator());
+                    builder.SetCurrentDebugLocation(call->getDebugLoc());
+                    auto obj_i8 = builder.CreateBitCast(call, Type::getInt8PtrTy(call->getContext(), call->getType()->getPointerAddressSpace()));
+                    // Note that this alignment is assuming the GC allocates at least pointer-aligned memory
+                    auto align = Align(DL.getPointerSize(0));
+                    auto clear_obj = builder.CreateMemSet(obj_i8, ConstantInt::get(Type::getInt8Ty(call->getContext()), 0), call->getArgOperand(1), align);
+                    if (MSSAU.getMemorySSA()) {
+                        auto clear_mdef = MSSAU.createMemoryAccessInBB(clear_obj, nullptr, clear_obj->getParent(), MemorySSA::BeforeTerminator);
+                        MSSAU.insertDef(cast<MemoryDef>(clear_mdef), true);
+                    }
                     changed = true;
                 }
             }
@@ -347,7 +358,7 @@ struct JuliaLICM : public JuliaPassContext {
             SE->forgetLoopDispositions(L);
         }
 #ifdef JL_VERIFY_PASSES
-        assert(!verifyFunction(*L->getHeader()->getParent(), &errs()));
+        assert(!verifyLLVMIR(*L));
 #endif
         return changed;
     }
@@ -395,6 +406,10 @@ PreservedAnalyses JuliaLICMPass::run(Loop &L, LoopAnalysisManager &AM,
     };
     auto juliaLICM = JuliaLICM(GetDT, GetLI, GetMSSA, GetSE);
     if (juliaLICM.runOnLoop(&L, ORE)) {
+#ifdef JL_DEBUG_BUILD
+        if (AR.MSSA)
+            AR.MSSA->verifyMemorySSA();
+#endif
         auto preserved = getLoopPassPreservedAnalyses();
         preserved.preserveSet<CFGAnalyses>();
         preserved.preserve<MemorySSAAnalysis>();
@@ -408,7 +423,8 @@ Pass *createJuliaLICMPass()
     return new JuliaLICMPassLegacy();
 }
 
-extern "C" JL_DLLEXPORT void LLVMExtraJuliaLICMPass_impl(LLVMPassManagerRef PM)
+extern "C" JL_DLLEXPORT_CODEGEN
+void LLVMExtraJuliaLICMPass_impl(LLVMPassManagerRef PM)
 {
     unwrap(PM)->add(createJuliaLICMPass());
 }

@@ -576,16 +576,20 @@ static NOINLINE int true_main(int argc, char *argv[])
 
     if (start_client) {
         jl_task_t *ct = jl_current_task;
+        int ret = 1;
         JL_TRY {
             size_t last_age = ct->world_age;
             ct->world_age = jl_get_world_counter();
-            jl_apply(&start_client, 1);
+            jl_value_t *r = jl_apply(&start_client, 1);
+            if (jl_typeof(r) != (jl_value_t*)jl_int32_type)
+                jl_type_error("typeassert", (jl_value_t*)jl_int32_type, r);
+            ret = jl_unbox_int32(r);
             ct->world_age = last_age;
         }
         JL_CATCH {
             jl_no_exc_handler(jl_current_exception(), ct);
         }
-        return 0;
+        return ret;
     }
 
     // run program if specified, otherwise enter REPL
@@ -690,9 +694,6 @@ static void rr_detach_teleport(void) {
 JL_DLLEXPORT int jl_repl_entrypoint(int argc, char *argv[])
 {
 #ifdef USE_TRACY
-    // Apply e.g. JULIA_TIMING_SUBSYSTEMS="+GC,-INFERENCE" and
-    //            JULIA_TIMING_METADATA_PRINT_LIMIT=20
-    jl_timing_apply_env();
     if (getenv("JULIA_WAIT_FOR_TRACY"))
         while (!TracyCIsConnected) jl_cpu_pause(); // Wait for connection
 #endif

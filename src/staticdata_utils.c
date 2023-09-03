@@ -178,7 +178,7 @@ static int has_backedge_to_worklist(jl_method_instance_t *mi, htable_t *visited,
     int depth = stack->len;
     *bp = (void*)((char*)HT_NOTFOUND + 4 + depth); // preliminarily mark as in-progress
     size_t i = 0, n = jl_array_len(mi->backedges);
-    int cycle = 0;
+    int cycle = depth;
     while (i < n) {
         jl_method_instance_t *be;
         i = get_next_edge(mi->backedges, i, NULL, &be);
@@ -194,7 +194,7 @@ static int has_backedge_to_worklist(jl_method_instance_t *mi, htable_t *visited,
             assert(cycle);
         }
     }
-    if (!found && cycle && cycle != depth)
+    if (!found && cycle != depth)
         return cycle + 3;
     // If we are the top of the current cycle, now mark all other parts of
     // our cycle with what we found.
@@ -505,19 +505,17 @@ static void jl_collect_edges(jl_array_t *edges, jl_array_t *ext_targets, jl_arra
                 size_t max_valid = ~(size_t)0;
                 if (invokeTypes) {
                     assert(jl_is_method_instance(callee));
-                    jl_methtable_t *mt = jl_method_get_table(((jl_method_instance_t*)callee)->def.method);
-                    if ((jl_value_t*)mt == jl_nothing) {
-                        callee_ids = NULL; // invalid
-                        break;
-                    }
-                    else {
-                        matches = jl_gf_invoke_lookup_worlds(invokeTypes, (jl_value_t*)mt, world, &min_valid, &max_valid);
-                        if (matches == jl_nothing) {
-                            callee_ids = NULL; // invalid
-                            break;
+                    jl_method_t *m = ((jl_method_instance_t*)callee)->def.method;
+                    matches = (jl_value_t*)m; // valid because there is no method replacement permitted
+#ifndef NDEBUG
+                    jl_methtable_t *mt = jl_method_get_table(m);
+                    if ((jl_value_t*)mt != jl_nothing) {
+                        jl_value_t *matches = jl_gf_invoke_lookup_worlds(invokeTypes, (jl_value_t*)mt, world, &min_valid, &max_valid);
+                        if (matches != jl_nothing) {
+                            assert(m == ((jl_method_match_t*)matches)->method);
                         }
-                        matches = (jl_value_t*)((jl_method_match_t*)matches)->method;
                     }
+#endif
                 }
                 else {
                     if (jl_is_method_instance(callee)) {
@@ -855,19 +853,27 @@ static jl_array_t *jl_verify_edges(jl_array_t *targets, size_t minworld)
         size_t max_valid = ~(size_t)0;
         if (invokesig) {
             assert(callee && "unsupported edge");
-            jl_methtable_t *mt = jl_method_get_table(((jl_method_instance_t*)callee)->def.method);
-            if ((jl_value_t*)mt == jl_nothing) {
-                max_valid = 0;
+            jl_method_t *m = ((jl_method_instance_t*)callee)->def.method;
+            if (jl_egal(invokesig, m->sig)) {
+                // the invoke match is `m` for `m->sig`, unless `m` is invalid
+                if (m->deleted_world < max_valid)
+                    max_valid = 0;
             }
             else {
-                matches = jl_gf_invoke_lookup_worlds(invokesig, (jl_value_t*)mt, minworld, &min_valid, &max_valid);
-                if (matches == jl_nothing) {
-                     max_valid = 0;
+                jl_methtable_t *mt = jl_method_get_table(m);
+                if ((jl_value_t*)mt == jl_nothing) {
+                    max_valid = 0;
                 }
                 else {
-                    matches = (jl_value_t*)((jl_method_match_t*)matches)->method;
-                    if (matches != expected) {
-                        max_valid = 0;
+                    matches = jl_gf_invoke_lookup_worlds(invokesig, (jl_value_t*)mt, minworld, &min_valid, &max_valid);
+                    if (matches == jl_nothing) {
+                         max_valid = 0;
+                    }
+                    else {
+                        matches = (jl_value_t*)((jl_method_match_t*)matches)->method;
+                        if (matches != expected) {
+                            max_valid = 0;
+                        }
                     }
                 }
             }
@@ -949,7 +955,7 @@ static jl_array_t *jl_verify_methods(jl_array_t *edges, jl_array_t *maxvalids)
         jl_method_instance_t *caller = (jl_method_instance_t*)jl_array_ptr_ref(edges, 2 * i);
         assert(jl_is_method_instance(caller) && jl_is_method(caller->def.method));
         jl_array_t *callee_ids = (jl_array_t*)jl_array_ptr_ref(edges, 2 * i + 1);
-        assert(jl_typeis((jl_value_t*)callee_ids, jl_array_int32_type));
+        assert(jl_typetagis((jl_value_t*)callee_ids, jl_array_int32_type));
         if (callee_ids == NULL) {
             // serializing the edges had failed
             maxvalids2_data[i] = 0;
@@ -999,9 +1005,10 @@ static int jl_verify_graph_edge(size_t *maxvalids2_data, jl_array_t *edges, size
     size_t depth = stack->len;
     visited->items[idx] = (void*)(1 + depth);
     jl_array_t *callee_ids = (jl_array_t*)jl_array_ptr_ref(edges, idx * 2 + 1);
-    assert(jl_typeis((jl_value_t*)callee_ids, jl_array_int32_type));
+    assert(jl_typetagis((jl_value_t*)callee_ids, jl_array_int32_type));
     int32_t *idxs = (int32_t*)jl_array_data(callee_ids);
     size_t i, n = jl_array_len(callee_ids);
+    cycle = depth;
     for (i = idxs[0] + 1; i < n; i++) {
         int32_t childidx = idxs[i];
         int child_cycle = jl_verify_graph_edge(maxvalids2_data, edges, childidx, visited, stack);
@@ -1020,7 +1027,7 @@ static int jl_verify_graph_edge(size_t *maxvalids2_data, jl_array_t *edges, size
         }
     }
     size_t max_valid = maxvalids2_data[idx];
-    if (max_valid != 0 && cycle && cycle != depth)
+    if (max_valid != 0 && cycle != depth)
         return cycle;
     // If we are the top of the current cycle, now mark all other parts of
     // our cycle with what we found.

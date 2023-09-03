@@ -245,18 +245,37 @@ ccall(:jl_toplevel_eval_in, Any, (Any, Any),
       (f::typeof(Typeof))(x) = ($(_expr(:meta,:nospecialize,:x)); isa(x,Type) ? Type{x} : typeof(x))
       end)
 
-
 macro nospecialize(x)
     _expr(:meta, :nospecialize, x)
 end
 
-TypeVar(n::Symbol) = _typevar(n, Union{}, Any)
-TypeVar(n::Symbol, @nospecialize(ub)) = _typevar(n, Union{}, ub)
-TypeVar(n::Symbol, @nospecialize(lb), @nospecialize(ub)) = _typevar(n, lb, ub)
+_is_internal(__module__) = __module__ === Core
+# can be used in place of `@assume_effects :foldable` (supposed to be used for bootstrapping)
+macro _foldable_meta()
+    return _is_internal(__module__) && _expr(:meta, _expr(:purity,
+        #=:consistent=#true,
+        #=:effect_free=#true,
+        #=:nothrow=#false,
+        #=:terminates_globally=#true,
+        #=:terminates_locally=#false,
+        #=:notaskstate=#true,
+        #=:inaccessiblememonly=#true,
+        #=:noub=#true))
+end
 
-UnionAll(v::TypeVar, @nospecialize(t)) = ccall(:jl_type_unionall, Any, (Any, Any), v, t)
+# n.b. the effects and model of these is refined in inference abstractinterpretation.jl
+TypeVar(@nospecialize(n)) = _typevar(n::Symbol, Union{}, Any)
+TypeVar(@nospecialize(n), @nospecialize(ub)) = _typevar(n::Symbol, Union{}, ub)
+TypeVar(@nospecialize(n), @nospecialize(lb), @nospecialize(ub)) = _typevar(n::Symbol, lb, ub)
+UnionAll(@nospecialize(v), @nospecialize(t)) = ccall(:jl_type_unionall, Any, (Any, Any), v::TypeVar, t)
 
-const Vararg = ccall(:jl_toplevel_eval_in, Any, (Any, Any), Core, _expr(:new, TypeofVararg))
+# simple convert for use by constructors of types in Core
+# note that there is no actual conversion defined here,
+# so the methods and ccall's in Core aren't permitted to use convert
+convert(::Type{Any}, @nospecialize(x)) = x
+convert(::Type{T}, x::T) where {T} = x
+cconvert(::Type{T}, x) where {T} = convert(T, x)
+unsafe_convert(::Type{T}, x::T) where {T} = x
 
 # dispatch token indicating a kwarg (keyword sorter) call
 function kwcall end
@@ -323,9 +342,8 @@ TypeError(where, @nospecialize(expected::Type), @nospecialize(got)) =
     TypeError(Symbol(where), "", expected, got)
 struct InexactError <: Exception
     func::Symbol
-    T  # Type
-    val
-    InexactError(f::Symbol, @nospecialize(T), @nospecialize(val)) = (@noinline; new(f, T, val))
+    args
+    InexactError(f::Symbol, @nospecialize(args...)) = (@noinline; new(f, args))
 end
 struct OverflowError <: Exception
     msg::AbstractString
@@ -448,27 +466,6 @@ function _Task(@nospecialize(f), reserved_stack::Int, completion_future)
     return ccall(:jl_new_task, Ref{Task}, (Any, Any, Int), f, completion_future, reserved_stack)
 end
 
-# simple convert for use by constructors of types in Core
-# note that there is no actual conversion defined here,
-# so the methods and ccall's in Core aren't permitted to use convert
-convert(::Type{Any}, @nospecialize(x)) = x
-convert(::Type{T}, x::T) where {T} = x
-cconvert(::Type{T}, x) where {T} = convert(T, x)
-unsafe_convert(::Type{T}, x::T) where {T} = x
-
-_is_internal(__module__) = __module__ === Core
-# can be used in place of `@assume_effects :foldable` (supposed to be used for bootstrapping)
-macro _foldable_meta()
-    return _is_internal(__module__) && Expr(:meta, Expr(:purity,
-        #=:consistent=#true,
-        #=:effect_free=#true,
-        #=:nothrow=#false,
-        #=:terminates_globally=#true,
-        #=:terminates_locally=#false,
-        #=:notaskstate=#false,
-        #=:inaccessiblememonly=#false))
-end
-
 const NTuple{N,T} = Tuple{Vararg{T,N}}
 
 ## primitive Array constructors
@@ -513,9 +510,11 @@ end)
 
 function Symbol(s::String)
     @_foldable_meta
+    @noinline
     return _Symbol(ccall(:jl_string_ptr, Ptr{UInt8}, (Any,), s), sizeof(s), s)
 end
 function Symbol(a::Array{UInt8,1})
+    @noinline
     return _Symbol(ccall(:jl_array_ptr, Ptr{UInt8}, (Any,), a), Intrinsics.arraylen(a), a)
 end
 Symbol(s::Symbol) = s
@@ -536,11 +535,10 @@ import Core: CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, Return
 end # module IR
 
 # docsystem basics
-const unescape = Symbol("hygienic-scope")
 macro doc(x...)
     docex = atdoc(__source__, __module__, x...)
     isa(docex, Expr) && docex.head === :escape && return docex
-    return Expr(:escape, Expr(unescape, docex, typeof(atdoc).name.module))
+    return Expr(:escape, Expr(:var"hygienic-scope", docex, typeof(atdoc).name.module, __source__))
 end
 macro __doc__(x)
     return Expr(:escape, Expr(:block, Expr(:meta, :doc), x))
@@ -631,8 +629,6 @@ eval(Core, :(NamedTuple{names,T}(args::T) where {names, T <: Tuple} =
 
 import .Intrinsics: eq_int, trunc_int, lshr_int, sub_int, shl_int, bitcast, sext_int, zext_int, and_int
 
-throw_inexacterror(f::Symbol, ::Type{T}, val) where {T} = (@noinline; throw(InexactError(f, T, val)))
-
 function is_top_bit_set(x)
     @inline
     eq_int(trunc_int(UInt8, lshr_int(x, sub_int(shl_int(sizeof(x), 3), 1))), trunc_int(UInt8, 1))
@@ -642,6 +638,9 @@ function is_top_bit_set(x::Union{Int8,UInt8})
     @inline
     eq_int(lshr_int(x, 7), trunc_int(typeof(x), 1))
 end
+
+#TODO delete this function (but see #48097):
+throw_inexacterror(args...) = throw(InexactError(args...))
 
 function check_top_bit(::Type{To}, x) where {To}
     @inline
@@ -829,8 +828,10 @@ Integer(x::Union{Float16, Float32, Float64}) = Int(x)
 # `_parse` must return an `svec` containing an `Expr` and the new offset as an
 # `Int`.
 #
-# The internal jl_parse which will call into Core._parse if not `nothing`.
+# The internal jl_parse will call into Core._parse if not `nothing`.
 _parse = nothing
+
+_setparser!(parser) = setglobal!(Core, :_parse, parser)
 
 # support for deprecated uses of internal _apply function
 _apply(x...) = Core._apply_iterate(Main.Base.iterate, x...)

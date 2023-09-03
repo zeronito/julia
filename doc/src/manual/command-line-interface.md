@@ -1,4 +1,4 @@
-# Command-line Interface
+# [Command-line Interface](@id cli)
 
 ## Using arguments inside scripts
 
@@ -39,6 +39,58 @@ $ julia --color=yes -O -- script.jl arg1 arg2..
 
 See also [Scripting](@ref man-scripting) for more information on writing Julia scripts.
 
+## The `Main.main` entry point
+
+At the conclusion of executing a script or expression, `julia` will attempt to execute the function
+`Main.main(ARGS)` (if such a function has been defined). This feature is intended to aid in the unification
+of compiled and interactive workflows. In compiled workflows, loading the code that defines the `main`
+function may be spatially and temporally separated from the invocation. However, for interactive workflows,
+the behavior is equivalent to explicitly calling `exit(main(ARGS))` at the end of the evaluated script or
+expression.
+
+!!! compat "Julia 1.11"
+    The special entry point `Main.main` was added in Julia 1.11. For compatibility with prior julia versions,
+    add an explicit `VERSION < v"1.11" && exit(main(ARGS))` at the end of your scripts.
+
+To see this feature in action, consider the following definition, which will execute the print function despite there being no explicit call to `main`:
+
+```
+$ julia -e 'main(ARGS) = println("Hello World!")'
+Hello World!
+$
+```
+
+Only the `main` binding in the `Main`, module has this special behavior. For example, using `hello`
+instead of `main` will result in the `hello` function not executing:
+
+```
+$ julia -e 'hello(ARGS) = println("Hello World!")'
+$
+```
+
+The `main` binding may be imported from a package. A hello package defined as
+
+```
+module Hello
+
+export main
+main(ARGS) = println("Hello from the package!")
+
+end
+```
+
+may be used as:
+
+```
+$ julia -e 'using Hello'
+Hello from the package!
+$ julia -e 'import Hello' # N.B.: Execution depends on the binding not whether the package is loaded
+$
+```
+
+However, note that the current best practice recommendation is to not mix application and reusable library
+code in the same package. Helper applications may be distributed as separate pacakges or as scripts with
+separate `main` entry points in a package's `bin` folder.
 
 ## Parallel mode
 
@@ -95,13 +147,13 @@ The following is a complete list of command-line switches available when launchi
 |`-v`, `--version`                      |Display version information|
 |`-h`, `--help`                         |Print command-line options (this message).|
 |`--help-hidden`                        |Uncommon options not shown by `-h`|
-|`--project[={<dir>\|@.}]`              |Set `<dir>` as the home project/environment. The default `@.` option will search through parent directories until a `Project.toml` or `JuliaProject.toml` file is found.|
+|`--project[={<dir>\|@.}]`              |Set `<dir>` as the active project/environment. The default `@.` option will search through parent directories until a `Project.toml` or `JuliaProject.toml` file is found.|
 |`-J`, `--sysimage <file>`              |Start up with the given system image file|
 |`-H`, `--home <dir>`                   |Set location of `julia` executable|
 |`--startup-file={yes*\|no}`            |Load `JULIA_DEPOT_PATH/config/startup.jl`; if `JULIA_DEPOT_PATH` environment variable is unset, load `~/.julia/config/startup.jl`|
 |`--handle-signals={yes*\|no}`          |Enable or disable Julia's default signal handlers|
 |`--sysimage-native-code={yes*\|no}`    |Use native code from system image if available|
-|`--compiled-modules={yes*\|no}`        |Enable or disable incremental precompilation of modules|
+|`--compiled-modules={yes*\|no\|existing}` |Enable or disable incremental precompilation of modules. The `existing` option allows use of existing compiled modules that were previously precompiled, but disallows creation of new precompile files.|
 |`--pkgimages={yes*\|no}`               |Enable or disable usage of native code caching in the form of pkgimages|
 |`-e`, `--eval <expr>`                  |Evaluate `<expr>`|
 |`-E`, `--print <expr>`                 |Evaluate `<expr>` and display the result|
