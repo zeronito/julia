@@ -1,8 +1,11 @@
 // This file is a part of Julia. License is MIT: https://julialang.org/license
 
-// Fallback processor detection and dispatch
+// RISCV processor detection and dispatch
 
-namespace Fallback {
+static constexpr FeatureName *feature_names = nullptr;
+static constexpr uint32_t nfeature_names = 0;
+
+namespace RISCV {
 
 static inline const std::string &host_cpu_name()
 {
@@ -40,7 +43,7 @@ static TargetData<1> arg_target_data(const TargetData<1> &arg, bool require_host
     return res;
 }
 
-static uint32_t sysimg_init_cb(const void *id)
+static uint32_t sysimg_init_cb(const void *id, jl_value_t **rejection_reason)
 {
     // First see what target is requested for the JIT.
     auto &cmdline = get_cmdline_targets();
@@ -58,7 +61,7 @@ static uint32_t sysimg_init_cb(const void *id)
     return best_idx;
 }
 
-static uint32_t pkgimg_init_cb(const void *id)
+static uint32_t pkgimg_init_cb(const void *id, jl_value_t **rejection_reason)
 {
     TargetData<1> target = jit_targets.front();
     // Find the last name match or use the default one.
@@ -117,16 +120,21 @@ get_llvm_target_str(const TargetData<1> &data)
 
 }
 
-using namespace Fallback;
+using namespace RISCV;
 
-jl_sysimg_fptrs_t jl_init_processor_sysimg(void *hdl)
+JL_DLLEXPORT jl_value_t *jl_get_cpu_features(void)
+{
+    return jl_cstr_to_string(jl_get_cpu_features_llvm().c_str());
+}
+
+jl_image_t jl_init_processor_sysimg(void *hdl)
 {
     if (!jit_targets.empty())
         jl_error("JIT targets already initialized");
     return parse_sysimg(hdl, sysimg_init_cb);
 }
 
-jl_sysimg_fptrs_t jl_init_processor_pkgimg(void *hdl)
+jl_image_t jl_init_processor_pkgimg(void *hdl)
 {
     if (jit_targets.empty())
         jl_error("JIT targets not initialized");
@@ -164,6 +172,17 @@ extern "C" std::vector<jl_target_spec_t> jl_get_llvm_clone_targets(void)
         res.push_back(ele);
     }
     return res;
+}
+
+JL_DLLEXPORT jl_value_t* jl_check_pkgimage_clones(char *data)
+{
+    jl_value_t *rejection_reason = NULL;
+    JL_GC_PUSH1(&rejection_reason);
+    uint32_t match_idx = pkgimg_init_cb(data, &rejection_reason);
+    JL_GC_POP();
+    if (match_idx == (uint32_t)-1)
+        return rejection_reason;
+    return jl_nothing;
 }
 
 JL_DLLEXPORT jl_value_t *jl_get_cpu_name(void)
