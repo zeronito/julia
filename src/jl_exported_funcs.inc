@@ -419,6 +419,7 @@
     XX(jl_safepoint_suspend_thread) \
     XX(jl_safepoint_resume_thread) \
     XX(jl_SC_CLK_TCK) \
+    XX(jl_schedule_interrupt_handler) \
     XX(jl_set_ARGS) \
     XX(jl_set_const) \
     XX(jl_set_errno) \
@@ -526,6 +527,7 @@
     XX(jl_ver_string) \
     XX(jl_vexceptionf) \
     XX(jl_vprintf) \
+    XX(jl_wake_thread) \
     XX(jl_wakeup_thread) \
     XX(jl_write_compiler_output) \
     XX(jl_yield) \
