@@ -507,7 +507,7 @@ AbstractArray{T}(A::AbstractArray{S,N}) where {T,S,N} = AbstractArray{T,N}(A)
 ## Helper for proper GC rooting without unsafe_convert
 eval(Core, quote
     _Symbol(ptr::Ptr{UInt8}, sz::Int, root::Any) = $(Expr(:foreigncall, QuoteNode(:jl_symbol_n),
-        Ref{Symbol}, svec(Ptr{UInt8}, Int), 0, QuoteNode(:ccall), :ptr, :sz, :root))
+        Ref{Symbol}, svec(Ptr{UInt8}, Int), 0, false, QuoteNode(:ccall), :ptr, :sz, :root))
 end)
 
 function Symbol(s::String)

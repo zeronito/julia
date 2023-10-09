@@ -1802,7 +1802,7 @@ function late_inline_special_case!(
         return SomeCase(typevar_call)
     elseif f === UnionAll && length(argtypes) == 3 && ⊑(optimizer_lattice(state.interp), argtypes[2], TypeVar)
         unionall_call = Expr(:foreigncall, QuoteNode(:jl_type_unionall), Any, svec(Any, Any),
-            0, QuoteNode(:ccall), stmt.args[2], stmt.args[3])
+            0, false, QuoteNode(:ccall), stmt.args[2], stmt.args[3])
         return SomeCase(unionall_call)
     elseif is_return_type(f)
         if isconstType(type)

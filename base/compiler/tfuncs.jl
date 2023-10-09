@@ -2905,7 +2905,7 @@ end
 # N.B. the `abstract_eval` callback below allows us to use these queries
 # both during abstract interpret and optimization
 
-const FOREIGNCALL_ARG_START = 6
+const FOREIGNCALL_ARG_START = 7
 
 function foreigncall_effects(@specialize(abstract_eval), e::Expr)
     args = e.args

@@ -1029,6 +1029,7 @@ public:
     AttributeList attributes; // vector of function call site attributes
     Type *lrt; // input parameter of the llvm return type (from julia_struct_to_llvm)
     bool retboxed; // input parameter indicating whether lrt is jl_value_t*
+    bool gc_safe; // input parameter indicating whether the call is safe to execute concurrently to GC
     Type *prt; // out parameter of the llvm return type for the function signature
     int sret; // out parameter for indicating whether return value has been moved to the first argument position
     std::string err_msg;
@@ -1041,8 +1042,8 @@ public:
     size_t nreqargs; // number of required arguments in ccall function definition
     jl_codegen_params_t *ctx;
 
-    function_sig_t(const char *fname, Type *lrt, jl_value_t *rt, bool retboxed, jl_svec_t *at, jl_unionall_t *unionall_env, size_t nreqargs, CallingConv::ID cc, bool llvmcall, jl_codegen_params_t *ctx)
-      : lrt(lrt), retboxed(retboxed),
+    function_sig_t(const char *fname, Type *lrt, jl_value_t *rt, bool retboxed, bool gc_safe, jl_svec_t *at, jl_unionall_t *unionall_env, size_t nreqargs, CallingConv::ID cc, bool llvmcall, jl_codegen_params_t *ctx)
+      : lrt(lrt), retboxed(retboxed), gc_safe(gc_safe),
         prt(NULL), sret(0), cc(cc), llvmcall(llvmcall),
         at(at), rt(rt), unionall_env(unionall_env),
         nccallargs(jl_svec_len(at)), nreqargs(nreqargs),
@@ -1064,8 +1065,7 @@ public:
             const native_sym_arg_t &symarg,
             jl_cgval_t *argv,
             SmallVector<Value*, 16> &gc_uses,
-            bool static_rt,
-            bool gc_safe) const;
+            bool static_rt) const;
 
 private:
 std::string generate_func_sig(const char *fname)
@@ -1190,6 +1190,9 @@ std::string generate_func_sig(const char *fname)
         RetAttrs = RetAttrs.addAttribute(LLVMCtx, Attribute::NonNull);
     if (rt == jl_bottom_type)
         FnAttrs = FnAttrs.addAttribute(LLVMCtx, Attribute::NoReturn);
+    if (gc_safe)
+        FnAttrs = FnAttrs.addAttribute(LLVMCtx, "julia.gc_safe");
+
     assert(attributes.isEmpty());
     attributes = AttributeList::get(LLVMCtx, FnAttrs, RetAttrs, paramattrs);
     return "";
@@ -1305,19 +1308,19 @@ static const std::string verify_ccall_sig(jl_value_t *&rt, jl_value_t *at,
     return "";
 }
 
-const int fc_args_start = 6;
+const int fc_args_start = 7;
 
-// Expr(:foreigncall, pointer, rettype, (argtypes...), nreq, [cconv | (cconv, effects)], args..., roots...)
+// Expr(:foreigncall, pointer, rettype, (argtypes...), nreq, gc_safe, [cconv | (cconv, effects)], args..., roots...)
 static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
 {
-    JL_NARGSV(ccall, 5);
+    JL_NARGSV(ccall, 6);
     args -= 1;
     jl_value_t *rt = args[2];
     jl_value_t *at = args[3];
     size_t nccallargs = jl_svec_len(at);
     size_t nreqargs = jl_unbox_long(args[4]); // if vararg
-    assert(jl_is_quotenode(args[5]));
-    jl_value_t *jlcc = jl_quotenode_value(args[5]);
+    assert(jl_is_quotenode(args[6]));
+    jl_value_t *jlcc = jl_quotenode_value(args[6]);
     jl_sym_t *cc_sym = NULL;
     if (jl_is_symbol(jlcc)) {
         cc_sym = (jl_sym_t*)jlcc;
@@ -1325,12 +1328,9 @@ static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
     else if (jl_is_tuple(jlcc)) {
         cc_sym = (jl_sym_t*)jl_get_nth_field_noalloc(jlcc, 0);
     }
-    // TODO: Can we detect calls to the runtime and not mark them gc_safe,
-    //       but for all other ccall we transition? We could add a new cconv
-    //       for runtime calls.
     // TODO: Can we introduce a intrinisc token = @julia.gc_safe_begin()
     //       and "grow" gc safe regions so that we minimize the overhead?
-    bool gc_safe = false;
+    bool gc_safe = jl_unbox_bool(args[5]);
     assert(jl_is_symbol(cc_sym));
     native_sym_arg_t symarg = {};
     JL_GC_PUSH3(&rt, &at, &symarg.gcroot);
@@ -1450,7 +1450,7 @@ static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
     }
     if (rt != args[2] && rt != (jl_value_t*)jl_any_type)
         rt = jl_ensure_rooted(ctx, rt);
-    function_sig_t sig("ccall", lrt, rt, retboxed,
+    function_sig_t sig("ccall", lrt, rt, retboxed, gc_safe,
                        (jl_svec_t*)at, unionall, nreqargs,
                        cc, llvmcall, &ctx.emission_context);
     for (size_t i = 0; i < nccallargs; i++) {
@@ -1920,8 +1920,7 @@ static jl_cgval_t emit_ccall(jl_codectx_t &ctx, jl_value_t **args, size_t nargs)
             symarg,
             argv.data(),
             gc_uses,
-            static_rt,
-            gc_safe);
+            static_rt);
     JL_GC_POP();
     return retval;
 }
@@ -1931,8 +1930,7 @@ jl_cgval_t function_sig_t::emit_a_ccall(
         const native_sym_arg_t &symarg,
         jl_cgval_t *argv,
         SmallVector<Value*, 16> &gc_uses,
-        bool static_rt,
-        bool gc_safe) const
+        bool static_rt) const
 {
     ++EmittedCCalls;
     if (!err_msg.empty()) {
@@ -2113,11 +2111,11 @@ jl_cgval_t function_sig_t::emit_a_ccall(
         }
     }
 
-    Value *last_gc_state = NULL;
-    Value *ptls = get_current_ptls(ctx); // Do we need to reload this after the ccall?
+    // Value *last_gc_state = NULL;
+    // Value *ptls = get_current_ptls(ctx); // Do we need to reload this after the ccall?
 
-    if (gc_safe)
-        last_gc_state = emit_gc_safe_enter(ctx.builder, ctx.types().T_size, ptls, false);
+    // if (gc_safe)
+    //    last_gc_state = emit_gc_safe_enter(ctx.builder, ctx.types().T_size, ptls, false);
     OperandBundleDef OpBundle("jl_roots", gc_uses);
     // the actual call
     CallInst *ret = ctx.builder.CreateCall(functype, llvmf,
@@ -2133,8 +2131,11 @@ jl_cgval_t function_sig_t::emit_a_ccall(
         ctx.f->addFnAttr(Attribute::StackProtectReq);
     }
 
-    if (gc_safe)
-        emit_gc_safe_leave(ctx.builder, ctx.types().T_size, ptls, last_gc_state, false);
+    // if (gc_safe)
+        // ret->addAttribute("julia.gc_safe");
+
+    //if (gc_safe)
+    //    emit_gc_safe_leave(ctx.builder, ctx.types().T_size, ptls, last_gc_state, false);
 
     if (rt == jl_bottom_type) {
         CreateTrap(ctx.builder);

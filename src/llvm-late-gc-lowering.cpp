@@ -2484,16 +2484,21 @@ bool LateLowerGCFrame::CleanupIR(Function &F, State *S, bool *CFGModified) {
                 NewCall->copyMetadata(*CI);
                 CI->replaceAllUsesWith(NewCall);
                 UpdatePtrNumbering(CI, NewCall, S);
-            } else if (CI->arg_size() == CI->getNumOperands()) {
-                /* No operand bundle to lower */
-                ++it;
-                continue;
             } else {
-                CallInst *NewCall = CallInst::Create(CI, None, CI);
-                NewCall->takeName(CI);
-                NewCall->copyMetadata(*CI);
-                CI->replaceAllUsesWith(NewCall);
-                UpdatePtrNumbering(CI, NewCall, S);
+                if (CI->getFnAttr("julia.gc_safe").isValid())
+                    dbgs() << "Found julia.gc_safe attribute on" << *CI;
+                if (CI->arg_size() == CI->getNumOperands()) {
+                    /* No operand bundle to lower */
+                    ++it;
+                    continue;
+                } else {
+                    // remove operand bundle
+                    CallInst *NewCall = CallInst::Create(CI, None, CI);
+                    NewCall->takeName(CI);
+                    NewCall->copyMetadata(*CI);
+                    CI->replaceAllUsesWith(NewCall);
+                    UpdatePtrNumbering(CI, NewCall, S);
+                }
             }
             if (!CI->use_empty()) {
                 CI->replaceAllUsesWith(UndefValue::get(CI->getType()));
