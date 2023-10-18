@@ -4521,7 +4521,7 @@ f(x) = yt(x)
                             (append (if (atom-or-not-tuple-call? (cadr e))
                                         (compile-args (list (cadr e)) break-labels)
                                         (list (cadr e)))
-                                    (list-head (cddr e) 4)
+                                    (list-head (cddr e) 5)
                                     (compile-args (list-tail e 7) break-labels)))
                            ;; NOTE: arguments of cfunction must be left in place
                            ;;       except for argument 2 (fptr)
