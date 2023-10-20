@@ -10,7 +10,7 @@ using .Base: copymutable, LinearIndices, length, (:),
     AbstractVector, @inbounds, AbstractRange, @eval, @inline, Vector, @noinline,
     AbstractMatrix, AbstractUnitRange, isless, identity, eltype, >, <, <=, >=, |, +, -, *, !,
     extrema, sub_with_overflow, add_with_overflow, oneunit, div, getindex, setindex!,
-    length, resize!, fill, Missing, require_one_based_indexing, keytype
+    length, resize!, fill, Missing, require_one_based_indexing, keytype, midpoint
 
 using .Base: >>>, !==
 
@@ -164,11 +164,6 @@ same thing as `partialsort!` but leaving `v` unmodified.
 """
 partialsort(v::AbstractVector, k::Union{Integer,OrdinalRange}; kws...) =
     partialsort!(copymutable(v), k; kws...)
-
-# This implementation of `midpoint` is performance-optimized but safe
-# only if `lo <= hi`.
-midpoint(lo::T, hi::T) where T<:Integer = lo + ((hi - lo) >>> 0x01)
-midpoint(lo::Integer, hi::Integer) = midpoint(promote(lo, hi)...)
 
 # reference on sorted binary search:
 #   http://www.tbray.org/ongoing/When/200x/2003/03/22/Binary
@@ -499,12 +494,12 @@ function sort!(v::AbstractVector, lo::Integer, hi::Integer, ::InsertionSortAlg, 
         j = i
         x = v[i]
         while j > lo
-            if lt(o, x, v[j-1])
-                v[j] = v[j-1]
-                j -= 1
-                continue
+            y = v[j-1]
+            if !lt(o, x, y)
+                break
             end
-            break
+            v[j] = y
+            j -= 1
         end
         v[j] = x
     end

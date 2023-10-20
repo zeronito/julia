@@ -46,6 +46,7 @@ static void removeGCPreserve(CallInst *call, Instruction *val)
 {
     auto replace = Constant::getNullValue(val->getType());
     call->replaceUsesOfWith(val, replace);
+    call->setAttributes(AttributeList());
     for (auto &arg: call->arg_operands()) {
         if (!isa<Constant>(arg.get())) {
             return;
@@ -424,7 +425,10 @@ ssize_t Optimizer::getGCAllocSize(Instruction *I)
     if (call->getCalledOperand() != pass.alloc_obj_func)
         return -1;
     assert(call->getNumArgOperands() == 3);
-    size_t sz = (size_t)cast<ConstantInt>(call->getArgOperand(1))->getZExtValue();
+    auto CI = dyn_cast<ConstantInt>(call->getArgOperand(1));
+    if (!CI)
+        return -1;
+    size_t sz = (size_t)CI->getZExtValue();
     if (sz < IntegerType::MAX_INT_BITS / 8 && sz < INT32_MAX)
         return sz;
     return -1;
@@ -1426,7 +1430,6 @@ void Optimizer::splitOnStack(CallInst *orig_inst)
                 }
                 auto new_call = builder.CreateCall(pass.gc_preserve_begin_func, operands);
                 new_call->takeName(call);
-                new_call->setAttributes(call->getAttributes());
                 call->replaceAllUsesWith(new_call);
                 call->eraseFromParent();
                 return;
