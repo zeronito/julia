@@ -186,7 +186,7 @@ export
     ErrorException, BoundsError, DivideError, DomainError, Exception,
     InterruptException, InexactError, OutOfMemoryError, ReadOnlyMemoryError,
     OverflowError, StackOverflowError, SegmentationFault, UndefRefError, UndefVarError,
-    TypeError, ArgumentError, MethodError, AssertionError, LoadError, InitError,
+    TypeError, ArgumentError, NotImplementedError, MethodError, AssertionError, LoadError, InitError,
     UndefKeywordError, ConcurrencyViolationError,
     # AST representation
     Expr, QuoteNode, LineNumberNode, GlobalRef,
