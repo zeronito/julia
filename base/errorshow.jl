@@ -234,7 +234,9 @@ end
 function showerror(io::IO, ex::NotImplementedError)
     print(io, "NotImplementedError: ")
     if ex.f !== nothing
-        f, _, arg_types_param, kwargs = unwrap_kwargs(f, ex.args, arg_types, is_arg_types)
+        is_arg_types = isa(ex.args, DataType)
+        arg_types = (is_arg_types ? ex.args : typesof(ex.args...))::DataType
+        f, _, arg_types_param, kwargs = unwrap_kwargs(ex.f, ex.args, arg_types, is_arg_types)
         print(io, "no implementation has been provided matching the signature ")
         print_method_signature(io, f, arg_types_param, kwargs)
         interfacestr = ex.interface == Any ?
@@ -311,7 +313,7 @@ function showerror(io::IO, ex::MethodError)
             f_is_function = true
         end
         print(io, "no method matching ")
-        print_method_signature(io, f, args_type_param, kwargs)
+        print_method_signature(io, f, arg_type_param, kwargs)
     end
     # catch the two common cases of element-wise addition and subtraction
     if (f === Base.:+ || f === Base.:-) && length(arg_types_param) == 2
