@@ -657,7 +657,7 @@ end
 function <<(x::Integer, c::Unsigned)
     @inline
     if c isa UInt
-        throw(MethodError(<<, (x, c)))
+        throw(NotImplementedError(<<, (x, c), Integer))
     end
     c <= typemax(UInt) ? x << (c % UInt) : zero(x) << UInt(0)
 end
@@ -696,7 +696,7 @@ See also [`>>>`](@ref), [`<<`](@ref).
 function >>(x::Integer, c::Integer)
     @inline
     if c isa UInt
-        throw(MethodError(>>, (x, c)))
+        throw(NotImplementedError(>>, (x, c), Integer))
     end
     typemin(Int) <= c <= typemax(Int) && return x >> (c % Int)
     (x >= 0 || c < 0) && return zero(x) >> 0
@@ -738,7 +738,7 @@ end
 function >>>(x::Integer, c::Unsigned)
     @inline
     if c isa UInt
-        throw(MethodError(>>>, (x, c)))
+        throw(NotImplementedError(>>>, (x, c), Integer))
     end
     c <= typemax(UInt) ? x >>> (c % UInt) : zero(x) >>> 0
 end
@@ -889,8 +889,8 @@ julia> widen(1.5f0)
 ```
 """
 widen(x::T) where {T} = convert(widen(T), x)
-widen(x::Type{T}) where {T} = throw(MethodError(widen, (T,)))
-widen(x::Type{Union{}}, slurp...) = throw(MethodError(widen, (Union{},)))
+widen(x::Type{T}) where {T} = throw(NotImplementedError(widen, (T,)))
+widen(x::Type{Union{}}, slurp...) = throw(NotImplementedError(widen, (Union{},)))
 
 # function pipelining
 

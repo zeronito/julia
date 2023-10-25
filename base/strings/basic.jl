@@ -103,7 +103,7 @@ UInt8
 See also [`ncodeunits`](@ref), [`checkbounds`](@ref).
 """
 @propagate_inbounds codeunit(s::AbstractString, i::Integer) = i isa Int ?
-    throw(MethodError(codeunit, (s, i))) : codeunit(s, Int(i))
+    throw(NotImplementedError(codeunit, (s, i), AbstractString)) : codeunit(s, Int(i))
 
 """
     isvalid(s::AbstractString, i::Integer) -> Bool
@@ -139,7 +139,7 @@ Stacktrace:
 ```
 """
 @propagate_inbounds isvalid(s::AbstractString, i::Integer) = i isa Int ?
-    throw(MethodError(isvalid, (s, i))) : isvalid(s, Int(i))
+    throw(NotImplementedError(isvalid, (s, i), AbstractString)) : isvalid(s, Int(i))
 
 """
     iterate(s::AbstractString, i::Integer) -> Union{Tuple{<:AbstractChar, Int}, Nothing}
@@ -153,7 +153,7 @@ protocol may assume that `i` is the start of a character in `s`.
 See also [`getindex`](@ref), [`checkbounds`](@ref).
 """
 @propagate_inbounds iterate(s::AbstractString, i::Integer) = i isa Int ?
-    throw(MethodError(iterate, (s, i))) : iterate(s, Int(i))
+    throw(NotImplementedError(iterate, (s, i), AbstractString)) : iterate(s, Int(i))
 
 ## basic generic definitions ##
 
