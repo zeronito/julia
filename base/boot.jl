@@ -357,6 +357,20 @@ end
 struct UndefKeywordError <: Exception
     var::Symbol
 end
+struct NotImplementedError <: Exception
+    f
+    args
+    msg::AbstractString
+    interface
+    NotImplementedError(@nospecialize(f), @nospecialize(args), @nospecialize(msg::AbstractString), @nospecialize(interface)) =
+        new(f, args, msg, interface)
+    NotImplementedError(@nospecialize(f), @nospecialize(args), @nospecialize(msg::AbstractString)) =
+        new(f, args, msg, Any)
+    NotImplementedError(@nospecialize(f), @nospecialize(args)) =
+        new(f, args, "", Any)
+    NotImplementedError(@nospecialize(msg::AbstractString)) =
+        new(msg)
+end
 
 struct MethodError <: Exception
     f
