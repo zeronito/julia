@@ -745,18 +745,18 @@ function compute_frameinfo(ir::IRCode)
             ndims = alloc_array_ndims(nn)
             ndims === nothing && @goto next_stmt
             if ndims ≠ 0
-                length(args) ≥ ndims+6 || @goto next_stmt
+                length(args) ≥ ndims+7 || @goto next_stmt
                 dims = Int[]
                 for i in 1:ndims
-                    dim = argextype(args[i+6], ir)
+                    dim = argextype(args[i+7], ir)
                     isa(dim, Const) || @goto next_stmt
                     dim = dim.val
                     isa(dim, Int) || @goto next_stmt
                     push!(dims, dim)
                 end
             else
-                length(args) ≥ 7 || @goto next_stmt
-                dims = argextype(args[7], ir)
+                length(args) ≥ 8 || @goto next_stmt
+                dims = argextype(args[8], ir)
                 if isa(dims, Const)
                     dims = dims.val
                     isa(dims, Tuple{Vararg{Int}}) || @goto next_stmt
@@ -1153,7 +1153,7 @@ end
 # TODO: we can apply a similar strategy like builtin calls to specialize some foreigncalls
 function escape_foreigncall!(astate::AnalysisState, pc::Int, args::Vector{Any})
     nargs = length(args)
-    if nargs < 6
+    if nargs < 7
         # invalid foreigncall, just escape everything
         add_conservative_changes!(astate, pc, args)
         return
@@ -1196,7 +1196,7 @@ function escape_foreigncall!(astate::AnalysisState, pc::Int, args::Vector{Any})
         add_escape_change!(astate, args[5+i], arg_info)
         add_liveness_change!(astate, args[5+i], pc)
     end
-    for i = (5+nargs):length(args)
+    for i = (6+nargs):length(args)
         arg = args[i]
         add_escape_change!(astate, arg, ⊥)
         add_liveness_change!(astate, arg, pc)

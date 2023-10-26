@@ -2588,7 +2588,7 @@ function abstract_eval_foreigncall(interp::AbstractInterpreter, e::Expr, vtypes:
     effects = foreigncall_effects(e) do @nospecialize x
         abstract_eval_value(interp, x, vtypes, sv)
     end
-    cconv = e.args[5]
+    cconv = e.args[6]
     if isa(cconv, QuoteNode) && (v = cconv.value; isa(v, Tuple{Symbol, UInt8}))
         override = decode_effects_override(v[2])
         effects = Effects(effects;

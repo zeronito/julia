@@ -155,7 +155,7 @@ static jl_value_t *resolve_globals(jl_value_t *expr, jl_module_t *module, jl_sve
                 return expr;
             }
             if (e->head == jl_foreigncall_sym) {
-                JL_NARGSV(ccall method definition, 5); // (fptr, rt, at, nreq, (cc, effects))
+                JL_NARGSV(ccall method definition, 6); // (fptr, rt, at, nreq, gc_safe, (cc, effects))
                 jl_value_t *rt = jl_exprarg(e, 1);
                 jl_value_t *at = jl_exprarg(e, 2);
                 if (!jl_is_type(rt)) {
@@ -184,8 +184,9 @@ static jl_value_t *resolve_globals(jl_value_t *expr, jl_module_t *module, jl_sve
                 }
                 check_c_types("ccall method definition", rt, at);
                 JL_TYPECHK(ccall method definition, long, jl_exprarg(e, 3));
-                JL_TYPECHK(ccall method definition, quotenode, jl_exprarg(e, 4));
-                jl_value_t *cc = jl_quotenode_value(jl_exprarg(e, 4));
+                JL_TYPECHK(ccall method definition, bool, jl_exprarg(e, 4));
+                JL_TYPECHK(ccall method definition, quotenode, jl_exprarg(e, 5));
+                jl_value_t *cc = jl_quotenode_value(jl_exprarg(e, 5));
                 if (!jl_is_symbol(cc)) {
                     JL_TYPECHK(ccall method definition, tuple, cc);
                     if (jl_nfields(cc) != 2) {

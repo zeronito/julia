@@ -427,7 +427,7 @@ function ispreserved(@nospecialize(x))
     return function (@nospecialize(stmt),)
         if Meta.isexpr(stmt, :foreigncall)
             nccallargs = length(stmt.args[3]::Core.SimpleVector)
-            for pidx = (6+nccallargs):length(stmt.args)
+            for pidx = (7+nccallargs):length(stmt.args)
                 if stmt.args[pidx] === x
                     return true
                 end
@@ -1133,7 +1133,7 @@ let
     @assert some_ccall !== nothing
     stmt = src.code[some_ccall]
     nccallargs = length(stmt.args[3]::Core.SimpleVector)
-    preserves = stmt.args[6+nccallargs:end]
+    preserves = stmt.args[7+nccallargs:end]
     @test length(refs) == 2
     @test length(preserves) == 2
     @test all(alloc -> alloc in preserves, refs)
