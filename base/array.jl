@@ -235,7 +235,7 @@ elsize(::Type{Union{}}, slurp...) = 0
 sizeof(a::Array) = length(a) * elsize(typeof(a)) # n.b. this ignores bitsunion bytes, as a historical fact
 
 function isassigned(a::Array, i::Int...)
-    @inline
+    @_propagate_inbounds_meta
     @boundscheck checkbounds(Bool, a, i...) || return false
     ii = _sub2ind(size(a), i...)
     return @inbounds isassigned(memoryref(a.ref, ii, false))
