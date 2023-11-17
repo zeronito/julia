@@ -954,6 +954,7 @@ export
     rm,
     samefile,
     stat,
+    stat!,
     symlink,
     tempdir,
     tempname,

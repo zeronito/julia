@@ -23,7 +23,10 @@ export
     mtime,
     operm,
     stat,
+    stat!,
     uperm
+
+const STAT_BUFFER_SIZE = Int(ccall(:jl_sizeof_stat, Int32, ()))
 
 struct StatStruct
     desc    :: Union{String, OS_HANDLE} # for show method, not included in equality or hash
@@ -144,14 +147,14 @@ show(io::IO, ::MIME"text/plain", st::StatStruct) = show_statstruct(io, st, false
 
 # stat & lstat functions
 
-macro stat_call(sym, arg1type, arg)
+macro stat_call!(stat_buf, sym, arg1type, arg)
     return quote
-        stat_buf = zeros(UInt8, Int(ccall(:jl_sizeof_stat, Int32, ())))
-        r = ccall($(Expr(:quote, sym)), Int32, ($(esc(arg1type)), Ptr{UInt8}), $(esc(arg)), stat_buf)
+        length($(esc(stat_buf))) < STAT_BUFFER_SIZE && resize!($(esc(stat_buf)), STAT_BUFFER_SIZE)
+        r = ccall($(Expr(:quote, sym)), Int32, ($(esc(arg1type)), Ptr{UInt8}), $(esc(arg)), $(esc(stat_buf)))
         if !(r in (0, Base.UV_ENOENT, Base.UV_ENOTDIR, Base.UV_EINVAL))
             uv_error(string("stat(", repr($(esc(arg))), ")"), r)
         end
-        st = StatStruct($(esc(arg)), stat_buf)
+        st = StatStruct($(esc(arg)), $(esc(stat_buf)))
         if ispath(st) != (r == 0)
             error("stat returned zero type for a valid path")
         end
@@ -159,13 +162,25 @@ macro stat_call(sym, arg1type, arg)
     end
 end
 
-stat(fd::OS_HANDLE)         = @stat_call jl_fstat OS_HANDLE fd
-stat(path::AbstractString)  = @stat_call jl_stat  Cstring path
-lstat(path::AbstractString) = @stat_call jl_lstat Cstring path
+"""
+    stat!(stat_buf::Vector{UInt8}, file)
+
+Like [`stat`](@ref), but tries to avoid internal allocations by using a pre-allocated
+buffer, `stat_buf`.  For a small performance gain over `stat`, consecutive calls to `stat!`
+can use the same `stat_buf`.  If `stat_buf` is not large enough to hold the result, it will
+be automatically resized.  A buffer with the minimum capacity can be allocated using:
+`zeros(UInt8, Base.Filesystem.STAT_BUFFER_SIZE)`.
+"""
+stat!(stat_buf::Vector{UInt8}, fd::OS_HANDLE)         = @stat_call! stat_buf jl_fstat OS_HANDLE fd
+stat!(stat_buf::Vector{UInt8}, path::AbstractString)  = @stat_call! stat_buf jl_stat  Cstring path
+lstat!(stat_buf::Vector{UInt8}, path::AbstractString) = @stat_call! stat_buf jl_lstat Cstring path
 if RawFD !== OS_HANDLE
-    global stat(fd::RawFD)  = stat(Libc._get_osfhandle(fd))
+    global stat!(stat_buf::Vector{UInt8}, fd::RawFD)  = stat!(stat_buf, Libc._get_osfhandle(fd))
 end
-stat(fd::Integer)           = stat(RawFD(fd))
+stat!(stat_buf::Vector{UInt8}, fd::Integer)           = stat!(stat_buf, RawFD(fd))
+
+stat(x) = stat!(zeros(UInt8, STAT_BUFFER_SIZE), x)
+lstat(x) = lstat!(zeros(UInt8, STAT_BUFFER_SIZE), x)
 
 """
     stat(file)
