@@ -590,6 +590,13 @@ end
     @test allunique(x for x in [0.0, -0.0] if true)
     @test !allunique([NaN, NaN])
     @test !allunique(x for x in [NaN, NaN] if true)
+    # strings
+    @test !allunique("aaaa")
+    @test !allunique(@views("aaaa"[1:3])) # sub-string / abstractstring
+    @test allunique("abcd")
+    @test allunique(@views("abcd"[1:3])) # sub-string / abstractstring
+    @test !allunique("a" ^ 100) # longer than 32 but less than 1000
+    @test !allunique("a" ^ 10_000) # longer than 1000
     # ranges
     @test allunique(4:7)
     @test allunique(1:1)
