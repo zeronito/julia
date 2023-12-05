@@ -796,10 +796,10 @@ using .Main.ImmutableArrays
     @test convert(AbstractMatrix{Float64}, Bl)::Bidiagonal{Float64,ImmutableArray{Float64,1,Array{Float64,1}}} == Bl
 end
 
-@testset "block-bidiagonal matrix indexing" begin
-    dv = [ones(4,3), ones(2,2).*2, ones(2,3).*3, ones(4,4).*4]
-    evu = [ones(4,2), ones(2,3).*2, ones(2,4).*3]
-    evl = [ones(2,3), ones(2,2).*2, ones(4,3).*3]
+@testset "block-bidiagonal matrix" begin
+    dv = [ones(4,3), fill(2.0,2,2), fill(3.0,2,3), fill(4.0,4,4)]
+    evu = [ones(4,2), fill(2.0,2,3), fill(3.0,2,4)]
+    evl = [ones(2,3), fill(3.0,2,2), fill(3.0,4,3)]
     BU = Bidiagonal(dv, evu, :U)
     BL = Bidiagonal(dv, evl, :L)
     # check that all the matrices along a column have the same number of columns,
@@ -819,12 +819,65 @@ end
         end
     end
 
+    @test diag(BU, -3) == [zeros(4,3)]
+    @test diag(BU, -2) == [zeros(2,3), zeros(4,2)]
+    @test diag(BU, -1) == [zeros(2,3), zeros(2,2), zeros(4,3)]
+    @test diag(BU, 2) == [zeros(4,3), zeros(2,4)]
+    @test diag(BU, 3) == [zeros(4,4)]
+
     M = ones(2,2)
-    for n in 0:1
-        dv = fill(M, n)
-        ev = fill(M, 0)
+    for n in 0:3
+        local dv = fill(M, n)
+        local ev = fill(M, max(0,n-1))
         B = Bidiagonal(dv, ev, :U)
         @test B == Matrix{eltype(B)}(B)
+    end
+
+    @testset "triu!/tril!" begin
+        @testset "L" begin
+            BL2 = Bidiagonal(copy(dv), copy(evl), :L)
+            tril!(BL2, 0)
+            @test BL2 == BL
+            triu!(BL2, -1)
+            @test BL2 == BL
+
+            tril!(BL2, -1)
+            @test all(iszero, diag(BL2))
+            tril!(BL2, -2)
+            @test all(iszero, BL2)
+
+            BL2 = Bidiagonal(copy(dv), copy(evl), :L)
+            triu!(BL2, 0)
+            @test all(iszero, diag(BL2,-1))
+            triu!(BL2, 2)
+            @test all(iszero, BL2)
+        end
+        @testset "U" begin
+            BU2 = Bidiagonal(copy(dv), copy(evu), :U)
+            tril!(BU2, 1)
+            @test BU2 == BU
+            triu!(BU2, 0)
+            @test BU2 == BU
+
+            tril!(BU2, 0)
+            @test all(iszero, diag(BU2,1))
+            tril!(BU2, -1)
+            @test all(iszero, BU2)
+
+            BU2 = Bidiagonal(copy(dv), copy(evu), :U)
+            triu!(BU2, 1)
+            @test all(iszero, diag(BU2,0))
+            triu!(BU2, 2)
+            @test all(iszero, BU2)
+        end
+    end
+
+    @testset "conversion to Tridiagonal" begin
+        TL = Tridiagonal(BL);
+        @test TL isa Tridiagonal{eltype(BL)}
+        @test diag(TL) == diag(BL)
+        @test diag(TL,-1) == diag(BL,-1)
+        @test diag(TL,1) == zero.(diag(BL,1))
     end
 end
 

@@ -115,10 +115,20 @@ AbstractMatrix{T}(D::Diagonal) where {T} = Diagonal{T}(D)
 AbstractMatrix{T}(D::Diagonal{T}) where {T} = copy(D)
 Matrix(D::Diagonal{T}) where {T} = Matrix{promote_type(T, typeof(zero(T)))}(D)
 Array(D::Diagonal{T}) where {T} = Matrix(D)
+
+function fillzero!(B, D::AbstractMatrix{<:AbstractMatrix})
+    B .= zero.(D)
+    return B
+end
+function fillzero!(B, D)
+    fill!(B, zero(eltype(B)))
+    return B
+end
+
 function Matrix{T}(D::Diagonal) where {T}
     n = size(D, 1)
     B = Matrix{T}(undef, n, n)
-    n > 1 && fill!(B, zero(T))
+    n > 1 && fillzero!(B, D)
     @inbounds for i in 1:n
         B[i,i] = D.diag[i]
     end
@@ -182,6 +192,7 @@ end
     end
     r
 end
+diagzero(A::AbstractMatrix, ind::CartesianIndex{2}) = diagzero(A, Tuple(ind)...)
 diagzero(::Diagonal{T}, i, j) where {T} = zero(T)
 diagzero(D::Diagonal{<:AbstractMatrix{T}}, i, j) where {T} = zeros(T, size(D.diag[i], 1), size(D.diag[j], 2))
 
@@ -227,7 +238,7 @@ function triu!(D::Diagonal{T}, k::Integer=0) where T
         throw(ArgumentError(string("the requested diagonal, $k, must be at least ",
             "$(-n + 1) and at most $(n + 1) in an $n-by-$n matrix")))
     elseif k > 0
-        fill!(D.diag, zero(T))
+        filldiagzero!(D.diag, D, 0)
     end
     return D
 end
@@ -238,7 +249,7 @@ function tril!(D::Diagonal{T}, k::Integer=0) where T
         throw(ArgumentError(string("the requested diagonal, $k, must be at least ",
             "$(-n - 1) and at most $(n - 1) in an $n-by-$n matrix")))
     elseif k < 0
-        fill!(D.diag, zero(T))
+        filldiagzero!(D.diag, D, 0)
     end
     return D
 end
@@ -708,13 +719,30 @@ adjoint(D::Diagonal) = Diagonal(adjoint.(D.diag))
 permutedims(D::Diagonal) = D
 permutedims(D::Diagonal, perm) = (Base.checkdims_perm(D, D, perm); D)
 
-function diag(D::Diagonal{T}, k::Integer=0) where T
+filldiagzero!(v, D::AbstractMatrix, k) = fill!(v, zero(eltype(D)))
+
+function filldiagzero!(v, D::AbstractMatrix{<:AbstractMatrix}, k)
+    dinds = diagind(D,k)
+    length(v) == length(dinds) ||
+        throw(ArgumentError("length of the destination is incompatible with the diagonal"))
+    isempty(dinds) && return v
+    CIstart = CartesianIndices(D)[first(dinds)]
+    Cstep = CartesianIndex(1,1)
+    for i in eachindex(v)
+        CI = CIstart + (i-firstindex(v)) * Cstep
+        v[i] = diagzero(D, CI)
+    end
+    v
+end
+
+function diag(D::Diagonal, k::Integer=0)
     # every branch call similar(..., ::Int) to make sure the
     # same vector type is returned independent of k
     if k == 0
         return copyto!(similar(D.diag, length(D.diag)), D.diag)
     elseif -size(D,1) <= k <= size(D,1)
-        return fill!(similar(D.diag, size(D,1)-abs(k)), zero(T))
+        v = similar(D.diag, size(D,1)-abs(k))
+        return filldiagzero!(v, D, k)
     else
         throw(ArgumentError(string("requested diagonal, $k, must be at least $(-size(D, 1)) ",
             "and at most $(size(D, 2)) for an $(size(D, 1))-by-$(size(D, 2)) matrix")))

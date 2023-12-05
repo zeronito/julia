@@ -118,8 +118,8 @@ Bidiagonal(A::Bidiagonal) = A
 Bidiagonal{T}(A::Bidiagonal{T}) where {T} = A
 Bidiagonal{T}(A::Bidiagonal) where {T} = Bidiagonal{T}(A.dv, A.ev, A.uplo)
 
-bidiagzero(::Bidiagonal{T}, i, j) where {T} = zero(T)
-function bidiagzero(A::Bidiagonal{<:AbstractMatrix}, i, j)
+diagzero(::Bidiagonal{T}, i, j) where {T} = zero(T)
+function diagzero(A::Bidiagonal{<:AbstractMatrix}, i, j)
     Tel = eltype(eltype(A.dv))
     if i < j && A.uplo == 'U' #= top right zeros =#
         return zeros(Tel, size(A.ev[i], 1), size(A.ev[j-1], 2))
@@ -165,7 +165,7 @@ end
     elseif A.uplo == 'L' && (i == j + 1)
         return @inbounds A.ev[j]
     else
-        return bidiagzero(A, i, j)
+        return diagzero(A, i, j)
     end
 end
 
@@ -198,7 +198,7 @@ function Matrix{T}(A::Bidiagonal) where T
     n = size(A, 1)
     B = Matrix{T}(undef, n, n)
     n == 0 && return B
-    n > 1 && fill!(B, zero(T))
+    n > 1 && fillzero!(B, A)
     @inbounds for i = 1:n - 1
         B[i,i] = A.dv[i]
         if A.uplo == 'U'
@@ -220,8 +220,9 @@ promote_rule(::Type{<:Matrix}, ::Type{<:Bidiagonal}) = Matrix
 function Tridiagonal{T}(A::Bidiagonal) where T
     dv = convert(AbstractVector{T}, A.dv)
     ev = convert(AbstractVector{T}, A.ev)
-    z = fill!(similar(ev), zero(T))
-    A.uplo == 'U' ? Tridiagonal(z, dv, ev) : Tridiagonal(ev, dv, z)
+    isupper = A.uplo == 'U'
+    z = filldiagzero!(similar(ev), A, isupper ? -1 : 1)
+    isupper ? Tridiagonal(z, dv, ev) : Tridiagonal(ev, dv, z)
 end
 promote_rule(::Type{<:Tridiagonal{T}}, ::Type{<:Bidiagonal{S}}) where {T,S} =
     @isdefined(T) && @isdefined(S) ? Tridiagonal{promote_type(T,S)} : Tridiagonal
@@ -345,15 +346,15 @@ function tril!(M::Bidiagonal{T}, k::Integer=0) where T
         throw(ArgumentError(string("the requested diagonal, $k, must be at least ",
             "$(-n - 1) and at most $(n - 1) in an $n-by-$n matrix")))
     elseif M.uplo == 'U' && k < 0
-        fill!(M.dv, zero(T))
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.dv, M, 0)
+        filldiagzero!(M.ev, M, 1)
     elseif k < -1
-        fill!(M.dv, zero(T))
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.dv, M, 0)
+        filldiagzero!(M.ev, M, -1)
     elseif M.uplo == 'U' && k == 0
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.ev, M, 1)
     elseif M.uplo == 'L' && k == -1
-        fill!(M.dv, zero(T))
+        filldiagzero!(M.dv, M, 0)
     end
     return M
 end
@@ -364,20 +365,20 @@ function triu!(M::Bidiagonal{T}, k::Integer=0) where T
         throw(ArgumentError(string("the requested diagonal, $k, must be at least",
             "$(-n + 1) and at most $(n + 1) in an $n-by-$n matrix")))
     elseif M.uplo == 'L' && k > 0
-        fill!(M.dv, zero(T))
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.dv, M, 0)
+        filldiagzero!(M.ev, M, -1)
     elseif k > 1
-        fill!(M.dv, zero(T))
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.dv, M, 0)
+        filldiagzero!(M.ev, M, 1)
     elseif M.uplo == 'L' && k == 0
-        fill!(M.ev, zero(T))
+        filldiagzero!(M.ev, M, -1)
     elseif M.uplo == 'U' && k == 1
-        fill!(M.dv, zero(T))
+        filldiagzero!(M.dv, M, 0)
     end
     return M
 end
 
-function diag(M::Bidiagonal{T}, n::Integer=0) where T
+function diag(M::Bidiagonal, n::Integer=0)
     # every branch call similar(..., ::Int) to make sure the
     # same vector type is returned independent of n
     if n == 0
@@ -385,7 +386,8 @@ function diag(M::Bidiagonal{T}, n::Integer=0) where T
     elseif (n == 1 && M.uplo == 'U') ||  (n == -1 && M.uplo == 'L')
         return copyto!(similar(M.ev, length(M.ev)), M.ev)
     elseif -size(M,1) <= n <= size(M,1)
-        return fill!(similar(M.dv, size(M,1)-abs(n)), zero(T))
+        v = similar(M.dv, size(M,1)-abs(n))
+        return filldiagzero!(v, M, n)
     else
         throw(ArgumentError(string("requested diagonal, $n, must be at least $(-size(M, 1)) ",
             "and at most $(size(M, 2)) for an $(size(M, 1))-by-$(size(M, 2)) matrix")))
