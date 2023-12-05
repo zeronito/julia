@@ -1575,7 +1575,7 @@ for f in (:sin, :cos, :tan, :asin, :atan, :acos,
           :exponent, :sqrt, :cbrt, :sinpi, :cospi, :sincospi, :tanpi)
     @eval function ($f)(x::Real)
         xf = float(x)
-        x === xf && throw(MethodError($f, (x,)))
+        x === xf && throw(NotImplementedError($f, (x,), Real))
         return ($f)(xf)
     end
     @eval $(f)(::Missing) = missing

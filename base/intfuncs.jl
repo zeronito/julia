@@ -146,8 +146,8 @@ gcd(a::Real, b::Real) = gcd(promote(a,b)...)
 lcm(a::Real, b::Real) = lcm(promote(a,b)...)
 gcd(a::Real, b::Real, c::Real...) = gcd(a, gcd(b, c...))
 lcm(a::Real, b::Real, c::Real...) = lcm(a, lcm(b, c...))
-gcd(a::T, b::T) where T<:Real = throw(MethodError(gcd, (a,b)))
-lcm(a::T, b::T) where T<:Real = throw(MethodError(lcm, (a,b)))
+gcd(a::T, b::T) where T<:Real = throw(NotImplementedError(gcd, (a,b), Real))
+lcm(a::T, b::T) where T<:Real = throw(NotImplementedError(lcm, (a,b), Real))
 
 gcd(abc::AbstractArray{<:Real}) = reduce(gcd, abc; init=zero(eltype(abc)))
 lcm(abc::AbstractArray{<:Real}) = reduce(lcm, abc; init=one(eltype(abc)))
@@ -213,7 +213,7 @@ Base.@assume_effects :terminates_locally function gcdx(a::Integer, b::Integer)
     x < 0 ? (-x, -s0, -t0) : (x, s0, t0)
 end
 gcdx(a::Real, b::Real) = gcdx(promote(a,b)...)
-gcdx(a::T, b::T) where T<:Real = throw(MethodError(gcdx, (a,b)))
+gcdx(a::T, b::T) where T<:Real = throw(NotImplementedError(gcdx, (a,b), Real))
 
 # multiplicative inverse of n mod m, error if none
 

@@ -226,21 +226,77 @@ function print_with_compare(io::IO, @nospecialize(a), @nospecialize(b), color::S
     end
 end
 
-function show_convert_error(io::IO, ex::MethodError, arg_types_param)
+function show_convert_error(io::IO, ex::NotImplementedError, arg_types_param)
+    # should maybe just be a new ConvertError.
     # See #13033
     T = striptype(ex.args[1])
-    if T === nothing
-        print(io, "First argument to `convert` must be a Type, got ", ex.args[1])
-    else
-        p2 = arg_types_param[2]
-        print_one_line = isa(T, DataType) && isa(p2, DataType) && T.name != p2.name
-        printstyled(io, "Cannot `convert` an object of type ")
-        print_one_line || printstyled(io, "\n  ")
-        print_with_compare(io, p2, T, :light_green)
-        printstyled(io, " to an object of type ")
-        print_one_line || printstyled(io, "\n  ")
-        print_with_compare(io, T, p2, :light_red)
+    p2 = arg_types_param[2]
+    print_one_line = isa(T, DataType) && isa(p2, DataType) && T.name != p2.name
+    printstyled(io, "Cannot `convert` an object of type ")
+    print_one_line || printstyled(io, "\n  ")
+    print_with_compare(io, p2, T, :light_green)
+    printstyled(io, " to an object of type ")
+    print_one_line || printstyled(io, "\n  ")
+    print_with_compare(io, T, p2, :light_red)
+    printstyled(io, ".")
+end
+
+function showerror(io::IO, ex::NotImplementedError)
+    print(io, "NotImplementedError")
+    if ex.f !== nothing || !isempty(ex.msg)
+        print(io, ": ")
     end
+    if ex.f !== nothing
+        is_arg_types = isa(ex.args, DataType)
+        arg_types = (is_arg_types ? ex.args : typesof(ex.args...))::DataType
+        f, _, arg_types_param, kwargs = unwrap_kwcall(ex.f, ex.args, arg_types, is_arg_types)
+        print(io, "no implementation has been provided matching the signature ")
+        print_method_signature(io, f, arg_types_param, kwargs)
+        interfacestr = ex.interface == Any ?
+            "." :
+            " expected as part of the interface for $(ex.interface)."
+        print(io, interfacestr)
+    end
+    if f === Base.convert && length(arg_types_param) == 2 && !is_arg_types
+        print(io, " ")
+        show_convert_error(io, ex, arg_types_param)
+    end
+
+    !isempty(ex.msg) && print(io, " ", ex.msg)
+    println(io)
+end
+
+function print_method_signature(io::IO, f, arg_types_param, kwargs)
+    iob = IOContext(IOBuffer(), io)     # for type abbreviation as in #49795; some, like `convert(T, x)`, should not abbreviate
+    show_signature_function(iob, isa(f, Type) ? Type{f} : typeof(f))
+    print(iob, "(")
+    for (i, typ) in enumerate(arg_types_param)
+        print(iob, "::", typ)
+        i == length(arg_types_param) || print(iob, ", ")
+    end
+    if !isempty(kwargs)
+        print(iob, "; ")
+        for (i, (k, v)) in enumerate(kwargs)
+            print(iob, k, "::", typeof(v))
+            i == length(kwargs)::Int || print(iob, ", ")
+        end
+    end
+    print(iob, ")")
+    str = String(take!(unwrapcontext(iob)[1]))
+    str = type_limited_string_from_context(io, str)
+    print(io, str)
+end
+
+function unwrap_kwcall(f, args, arg_types, is_arg_types)
+    arg_types_param::SimpleVector = arg_types.parameters
+    kwargs = ()
+    if f === Core.kwcall && !is_arg_types
+        f = (args::Tuple)[2]
+        args = args[3:end::Int]
+        arg_types_param = arg_types_param[3:end]
+        kwargs = pairs(args[1])
+    end
+    return f, args, arg_types_param, kwargs
 end
 
 function showerror(io::IO, ex::MethodError)
@@ -253,24 +309,15 @@ function showerror(io::IO, ex::MethodError)
     if isa(meth, MethodList) && length(meth) > 1
         return showerror_ambiguous(io, meth, f, arg_types)
     end
-    arg_types_param::SimpleVector = arg_types.parameters
-    show_candidates = true
     print(io, "MethodError: ")
+    f, args, arg_types_param, kwargs = unwrap_kwcall(f, ex.args, arg_types, is_arg_types)
+    ex = MethodError(f, args, ex.world)
     ft = typeof(f)
+    show_candidates = true
     f_is_function = false
-    kwargs = ()
-    if f === Core.kwcall && !is_arg_types
-        f = (ex.args::Tuple)[2]
-        ft = typeof(f)
-        arg_types_param = arg_types_param[3:end]
-        kwargs = pairs(ex.args[1])
-        ex = MethodError(f, ex.args[3:end::Int], ex.world)
-    end
     name = ft.name.mt.name
-    if f === Base.convert && length(arg_types_param) == 2 && !is_arg_types
-        f_is_function = true
-        show_convert_error(io, ex, arg_types_param)
-    elseif f === mapreduce_empty || f === reduce_empty
+    
+    if f === mapreduce_empty || f === reduce_empty
         print(io, "reducing over an empty collection is not allowed; consider supplying `init` to the reducer")
         show_candidates = false
     elseif isempty(methods(f)) && isa(f, DataType) && isabstracttype(f)
@@ -282,24 +329,7 @@ function showerror(io::IO, ex::MethodError)
             f_is_function = true
         end
         print(io, "no method matching ")
-        iob = IOContext(IOBuffer(), io)     # for type abbreviation as in #49795; some, like `convert(T, x)`, should not abbreviate
-        show_signature_function(iob, isa(f, Type) ? Type{f} : typeof(f))
-        print(iob, "(")
-        for (i, typ) in enumerate(arg_types_param)
-            print(iob, "::", typ)
-            i == length(arg_types_param) || print(iob, ", ")
-        end
-        if !isempty(kwargs)
-            print(iob, "; ")
-            for (i, (k, v)) in enumerate(kwargs)
-                print(iob, k, "::", typeof(v))
-                i == length(kwargs)::Int || print(iob, ", ")
-            end
-        end
-        print(iob, ")")
-        str = String(take!(unwrapcontext(iob)[1]))
-        str = type_limited_string_from_context(io, str)
-        print(io, str)
+        print_method_signature(io, f, arg_type_param, kwargs)
     end
     # catch the two common cases of element-wise addition and subtraction
     if (f === Base.:+ || f === Base.:-) && length(arg_types_param) == 2

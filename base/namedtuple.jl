@@ -151,7 +151,7 @@ NamedTuple{names}(itr) where {names} = NamedTuple{names}(Tuple(itr))
 NamedTuple(itr) = (; itr...)
 
 # avoids invalidating Union{}(...)
-NamedTuple{names, Union{}}(itr::Tuple) where {names} = throw(MethodError(NamedTuple{names, Union{}}, (itr,)))
+NamedTuple{names, Union{}}(itr::Tuple) where {names} = throw(NotImplementedError(NamedTuple{names, Union{}}, (itr,)))
 
 end # if Base
 

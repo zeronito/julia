@@ -543,7 +543,7 @@ function (*)(F::Hessenberg{<:Any,<:AbstractMatrix{T}}, x::S) where {T,S<:Number}
     if TS === T
         return rmul!(copy(F), convert(T, x))
     else
-        throw(MethodError(*, (F, x)))
+        throw(NotImplementedError(*, (F, x)))
     end
 end
 function (*)(x::S, F::Hessenberg{<:Any,<:AbstractMatrix{T}}) where {T,S<:Number}
@@ -551,7 +551,7 @@ function (*)(x::S, F::Hessenberg{<:Any,<:AbstractMatrix{T}}) where {T,S<:Number}
     if TS === T
         return lmul!(convert(T, x), copy(F))
     else
-        throw(MethodError(*, (x, F)))
+        throw(NotImplementedError(*, (x, F)))
     end
 end
 -(F::Hessenberg) = F * -one(eltype(F.H))

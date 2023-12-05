@@ -435,8 +435,8 @@ function Base.hash(x::CompoundPeriod, h::UInt)
     return h
 end
 
-Base.isless(x::FixedPeriod, y::OtherPeriod) = throw(MethodError(isless, (x, y)))
-Base.isless(x::OtherPeriod, y::FixedPeriod) = throw(MethodError(isless, (x, y)))
+Base.isless(x::FixedPeriod, y::OtherPeriod) = throw(ArgumentError("Fixed periods cannot be ordered with other periods."))
+Base.isless(x::OtherPeriod, y::FixedPeriod) = throw(ArgumentError("Fixed periods cannot be ordered with other periods."))
 
 Base.isless(x::Period, y::CompoundPeriod) = CompoundPeriod(x) < y
 Base.isless(x::CompoundPeriod, y::Period) = x < CompoundPeriod(y)

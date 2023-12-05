@@ -103,14 +103,14 @@ end
 for f in (:(Base.zero), :(Base.one), :(Base.oneunit))
     @eval ($f)(::Type{Missing}) = missing
     @eval function $(f)(::Type{Union{T, Missing}}) where T
-        T === Any && throw(MethodError($f, (Any,)))  # To prevent StackOverflowError
+        T === Any && throw(ArgumentError("Operation undefined on type Any."))  # To prevent StackOverflowError
         $f(T)
     end
 end
 for f in (:(Base.float), :(Base.complex))
     @eval $f(::Type{Missing}) = Missing
     @eval function $f(::Type{Union{T, Missing}}) where T
-        T === Any && throw(MethodError($f, (Any,)))  # To prevent StackOverflowError
+        T === Any && throw(ArgumentError("Operation undefined on type Any."))  # To prevent StackOverflowError
         Union{$f(T), Missing}
     end
 end
