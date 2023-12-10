@@ -275,15 +275,15 @@ test-specific dependencies, are available, see below.
 
 ### Test-specific dependencies
 
-There are two ways of adding test-specific dependencies (dependencies that are not dependencies of the package but 
+There are two ways of adding test-specific dependencies (dependencies that are not dependencies of the package but
 will still be available to load when the package is tested). If no `test/Project.toml` exists Pkg will default to
-use the `target` based test specific dependencies. 
+use the `target` based test specific dependencies.
 
 #### `target` based test specific dependencies
 
 !!! compat
     This older method of adding test-specific dependencies will be supported for all Julia 1.X releases.
-    
+
 Using this method of adding test-specific dependencies, the packages are added under an `[extras]` section and to a test target.
 E.g. to add `Markdown` and `Test` as test dependencies, add the following to the projects `Project.toml` file:
 
@@ -297,7 +297,7 @@ test = ["Markdown", "Test"]
 ```
 
 During testing the file `test/runtests.jl` will be executed with all dependencies from the `Project.toml` and the test dependencies
-loaded. This special dependency handling is done during a `Pkg.test` call and doesn't happen if `runtest.jl` is executed directly. 
+loaded. This special dependency handling is done during a `Pkg.test` call and doesn't happen if `runtest.jl` is executed directly.
 
 Note that the only supported targets are `test` and `build`, the latter of which (not recommended) can be used
 for any `deps/build.jl` scripts. This `target` based approach can't be used for other uses such as building
@@ -340,7 +340,7 @@ julia> write("test/runtests.jl",
              @test 1 == 1
              """);
 
-(test) pkg> activate .
+(test) pkg> activate
 
 (HelloWorld) pkg> test
    Testing HelloWorld
@@ -352,7 +352,7 @@ julia> write("test/runtests.jl",
   [d8327f2a] + HelloWorld v0.1.0 [`~/.julia/dev/Pkg/HelloWorld`]
    Testing HelloWorld tests passed```
 ```
-    
+
 ## Compatibility on dependencies
 
 Every dependency should in general have a compatibility constraint on it.
