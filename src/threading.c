@@ -7,8 +7,10 @@
 #include <inttypes.h>
 
 #include "julia.h"
+#include "julia_atomics.h"
 #include "julia_internal.h"
 #include "julia_assert.h"
+#include "julia_threads.h"
 
 #ifdef USE_ITTAPI
 #include "ittapi/ittnotify.h"
@@ -737,6 +739,27 @@ void jl_init_threading(void)
     gc_first_tid = nthreads;
 }
 
+int jl_process_events_locked(void) JL_NOTSAFEPOINT;
+void jl_utility_io_threadfun(void *arg)
+{
+    jl_adopt_thread();
+    jl_ptls_t ptls = jl_current_task->ptls;
+    int8_t gc_state  = jl_gc_safe_enter(ptls);
+    while (1) {
+        jl_fence(); // [^store_buffering_2]
+        if (jl_atomic_load_relaxed(&jl_uv_n_waiters) == 0)
+        {
+            if (JL_UV_TRYLOCK_NOGC())
+            {
+                jl_process_events_locked();
+                JL_UV_UNLOCK_NOGC();
+            }
+        }
+    }
+    jl_gc_safe_leave(ptls, gc_state);
+    return;
+}
+
 static uv_barrier_t thread_init_done;
 
 void jl_start_threads(void)
@@ -798,33 +821,11 @@ void jl_start_threads(void)
         }
         uv_thread_detach(&uvtid);
     }
-
     uv_barrier_wait(&thread_init_done);
-}
 
-_Atomic(unsigned) _threadedregion; // HACK: keep track of whether to prioritize IO or threading
-
-JL_DLLEXPORT int jl_in_threaded_region(void)
-{
-    return jl_atomic_load_relaxed(&_threadedregion) != 0;
-}
-
-JL_DLLEXPORT void jl_enter_threaded_region(void)
-{
-    jl_atomic_fetch_add(&_threadedregion, 1);
-}
-
-JL_DLLEXPORT void jl_exit_threaded_region(void)
-{
-    if (jl_atomic_fetch_add(&_threadedregion, -1) == 1) {
-        // make sure no more callbacks will run while user code continues
-        // outside thread region and might touch an I/O object.
-        JL_UV_LOCK();
-        JL_UV_UNLOCK();
-        // make sure thread 0 is not using the sleep_lock
-        // so that it may enter the libuv event loop instead
-        jl_wakeup_thread(0);
-    }
+    // utility thread uses jl_adopt_thread
+    uv_thread_create(&uvtid, jl_utility_io_threadfun, NULL);
+    uv_thread_detach(&uvtid);
 }
 
 // Profiling stubs
