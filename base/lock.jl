@@ -213,15 +213,18 @@ end
 """
     lock(f::Function, lock)
 
-Acquire the `lock`, execute `f` with the `lock` held, and release the `lock` when `f`
+If the second argument is a [`ReentrantLock`](@ref), acquire the `lock`,
+execute `f` with the `lock` held, and release the `lock` when `f`
 returns. If the lock is already locked by a different task/thread, wait for it to become
 available.
 
 When this function returns, the `lock` has been released, so the caller should
 not attempt to `unlock` it.
 
+Using a [`Channel`](@ref) as the second argument is also permitted.
+
 !!! compat "Julia 1.7"
-    Using a [`Channel`](@ref) as the second argument requires Julia 1.7 or later.
+    This two argument variant of the [`lock`](@ref) function requires Julia 1.7 or later.
 """
 function lock(f, l::AbstractLock)
     lock(l)
@@ -258,6 +261,9 @@ end
 ```
 This is similar to using [`lock`](@ref) with a `do` block, but avoids creating a closure
 and thus can improve the performance.
+
+!!! compat "Julia 1.7"
+    This macro requires Julia 1.7 or later.
 """
 macro lock(l, expr)
     quote
