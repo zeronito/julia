@@ -1562,6 +1562,7 @@ static const auto &builtin_func_map() {
           { jl_f__call_latest_addr,       new JuliaFunction<>{XSTR(jl_f__call_latest), get_func_sig, get_func_attrs} },
           { jl_f__call_in_world_addr,     new JuliaFunction<>{XSTR(jl_f__call_in_world), get_func_sig, get_func_attrs} },
           { jl_f__call_in_world_total_addr, new JuliaFunction<>{XSTR(jl_f__call_in_world_total), get_func_sig, get_func_attrs} },
+          { jl_f__call_within_addr, new JuliaFunction<>{XSTR(jl_f__call_within), get_func_sig, get_func_attrs} },
           { jl_f_throw_addr,              new JuliaFunction<>{XSTR(jl_f_throw), get_func_sig, get_func_attrs} },
           { jl_f_tuple_addr,              jltuple_func },
           { jl_f_svec_addr,               new JuliaFunction<>{XSTR(jl_f_svec), get_func_sig, get_func_attrs} },
@@ -1614,7 +1615,7 @@ extern "C" {
         /* safepoint_on_entry */ 1,
         /* gcstack_arg */ 1,
         /* use_jlplt*/ 1,
-        /* lookup */ jl_rettype_inferred_addr };
+        /* compiler */ NULL };
 }
 
 
@@ -4995,7 +4996,8 @@ static jl_cgval_t emit_invoke(jl_codectx_t &ctx, const jl_cgval_t &lival, ArrayR
             }
         }
         else {
-            jl_value_t *ci = ctx.params->lookup(mi, ctx.min_world, ctx.max_world);
+            jl_value_t *compiler = ctx.params->compiler;
+            jl_value_t *ci = jl_rettype_inferred(compiler, mi, ctx.min_world, ctx.max_world);
             if (ci != jl_nothing) {
                 jl_code_instance_t *codeinst = (jl_code_instance_t*)ci;
                 auto invoke = jl_atomic_load_acquire(&codeinst->invoke);
@@ -5999,7 +6001,7 @@ static std::pair<Function*, Function*> get_oc_function(jl_codectx_t &ctx, jl_met
     sigtype = jl_apply_tuple_type_v(jl_svec_data(sig_args), nsig);
 
     jl_method_instance_t *mi = jl_specializations_get_linfo(closure_method, sigtype, jl_emptysvec);
-    jl_code_instance_t *ci = (jl_code_instance_t*)jl_rettype_inferred_addr(mi, ctx.min_world, ctx.max_world);
+    jl_code_instance_t *ci = (jl_code_instance_t*)jl_rettype_inferred(jl_nothing, mi, ctx.min_world, ctx.max_world);
 
     if (ci == NULL || (jl_value_t*)ci == jl_nothing) {
         JL_GC_POP();
@@ -9685,7 +9687,8 @@ void jl_compile_workqueue(
                 if (policy != CompilationPolicy::Default &&
                     jl_atomic_load_relaxed(&codeinst->inferred) == jl_nothing) {
                     // Codegen lock is held, so SOURCE_MODE_FORCE_SOURCE_UNCACHED is not required
-                    codeinst = jl_type_infer(codeinst->def, jl_atomic_load_relaxed(&codeinst->max_world), 0, SOURCE_MODE_FORCE_SOURCE);
+
+                    codeinst = jl_type_infer(params.params->compiler, codeinst->def, jl_atomic_load_relaxed(&codeinst->max_world), 0, SOURCE_MODE_FORCE_SOURCE);
                 }
                 if (codeinst) {
                     orc::ThreadSafeModule result_m =
@@ -9894,6 +9897,9 @@ int jl_opaque_ptrs_set = 0;
 
 extern "C" void jl_init_llvm(void)
 {
+    if (jl_nothing == NULL) // make a placeholder
+        jl_nothing = jl_gc_permobj(0, jl_nothing_type);
+    jl_default_cgparams.compiler = jl_nothing;
     jl_page_size = jl_getpagesize();
     jl_default_debug_info_kind = (int) DICompileUnit::DebugEmissionKind::FullDebug;
     jl_default_cgparams.debug_info_level = (int) jl_options.debug_level;
