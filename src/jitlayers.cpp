@@ -204,6 +204,7 @@ static jl_callptr_t _jl_compile_codeinst(
     params.cache = true;
     params.imaging_mode = imaging_default();
     params.debug_level = jl_options.debug_level;
+    params.compiler = codeinst->owner;
     {
         orc::ThreadSafeModule result_m =
             jl_create_ts_module(name_from_method_instance(codeinst->def), params.tsctx, params.DL, params.TargetTriple);
@@ -531,7 +532,8 @@ jl_value_t *jl_dump_method_asm_impl(jl_method_instance_t *mi, size_t world,
         char emit_mc, char getwrapper, const char* asm_variant, const char *debuginfo, char binary)
 {
     // printing via disassembly
-    jl_code_instance_t *codeinst = jl_compile_method_internal(mi, world);
+    jl_value_t *compiler = jl_nothing; // FIXME
+    jl_code_instance_t *codeinst = jl_compile_method_internal(compiler, mi, world);
     if (codeinst) {
         uintptr_t fptr = (uintptr_t)jl_atomic_load_acquire(&codeinst->invoke);
         if (getwrapper)
@@ -554,7 +556,7 @@ jl_value_t *jl_dump_method_asm_impl(jl_method_instance_t *mi, size_t world,
             if (specfptr == 0) {
                 // Doesn't need SOURCE_MODE_FORCE_SOURCE_UNCACHED, because the codegen lock is held,
                 // so there's no concern that the ->inferred field will be deleted.
-                jl_code_instance_t *forced_ci = jl_type_infer(mi, world, 0, SOURCE_MODE_FORCE_SOURCE);
+                jl_code_instance_t *forced_ci = jl_type_infer(compiler, mi, world, 0, SOURCE_MODE_FORCE_SOURCE);
                 JL_GC_PUSH1(&forced_ci);
                 if (forced_ci) {
                     // Force compile of this codeinst even though it already has an ->invoke

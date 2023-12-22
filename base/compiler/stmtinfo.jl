@@ -236,4 +236,9 @@ struct ModifyOpInfo <: CallInfo
     info::CallInfo # the callinfo for the `op(getval(), x)` call
 end
 
+struct WithinCallInfo <: CallInfo
+    compiler::CompilerInstance
+    info::CallInfo
+end
+
 @specialize

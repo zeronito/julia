@@ -291,7 +291,8 @@ static void makeSafeName(GlobalObject &G)
 static void jl_ci_cache_lookup(const jl_cgparams_t &cgparams, jl_method_instance_t *mi, size_t world, jl_code_instance_t **ci_out, jl_code_info_t **src_out)
 {
     ++CICacheLookups;
-    jl_value_t *ci = cgparams.lookup(mi, world, world);
+    jl_value_t *compiler = cgparams.compiler;
+    jl_value_t *ci = jl_rettype_inferred(compiler, mi, world, world);
     JL_GC_PROMISE_ROOTED(ci);
     jl_code_instance_t *codeinst = NULL;
     if (ci != jl_nothing) {
@@ -304,12 +305,7 @@ static void jl_ci_cache_lookup(const jl_cgparams_t &cgparams, jl_method_instance
             *src_out = jl_uncompress_ir(def, codeinst, (jl_value_t*)*src_out);
     }
     if (*src_out == NULL || !jl_is_code_info(*src_out)) {
-        if (cgparams.lookup != jl_rettype_inferred_addr) {
-            jl_error("Refusing to automatically run type inference with custom cache lookup.");
-        }
-        else {
-            *ci_out = jl_type_infer(mi, world, 0, SOURCE_MODE_ABI);
-        }
+        *ci_out = jl_type_infer(compiler, mi, world, 0, SOURCE_MODE_ABI);
     }
     *ci_out = codeinst;
 }
@@ -364,6 +360,7 @@ void *jl_create_native_impl(jl_array_t *methods, LLVMOrcThreadSafeModuleRef llvm
     params.imaging_mode = imaging;
     params.debug_level = cgparams->debug_info_level;
     params.external_linkage = _external_linkage;
+    params.compiler = cgparams->compiler;
     size_t compile_for[] = { jl_typeinf_world, _world };
     for (int worlds = 0; worlds < 2; worlds++) {
         JL_TIMING(NATIVE_AOT, NATIVE_Codegen);
@@ -1939,9 +1936,9 @@ extern "C" JL_DLLEXPORT_CODEGEN jl_code_info_t *jl_gdbdumpcode(jl_method_instanc
     jl_printf(stream, "----\n");
 
     jl_code_info_t *src = NULL;
-    jl_value_t *ci = jl_default_cgparams.lookup(mi, world, world);
+    jl_value_t *ci = jl_rettype_inferred(jl_default_cgparams.compiler, mi, world, world);
     if (ci == jl_nothing) {
-        ci = (jl_value_t*)jl_type_infer(mi, world, 0, SOURCE_MODE_FORCE_SOURCE_UNCACHED);
+        ci = (jl_value_t*)jl_type_infer(jl_default_cgparams.compiler, mi, world, 0, SOURCE_MODE_FORCE_SOURCE_UNCACHED);
     } else {
         ci = NULL;
     }
@@ -1976,13 +1973,13 @@ void jl_get_llvmf_defn_impl(jl_llvmf_dump_t* dump, jl_method_instance_t *mi, siz
     jl_code_info_t *src = NULL;
     jl_code_instance_t *codeinst = NULL;
     JL_GC_PUSH2(&src, &codeinst);
-    jl_value_t *ci = params.lookup(mi, world, world);
+    jl_value_t *ci = jl_rettype_inferred(params.compiler, mi, world, world);
     if (ci && ci != jl_nothing) {
         codeinst = (jl_code_instance_t*)ci;
         src = (jl_code_info_t*)jl_atomic_load_relaxed(&codeinst->inferred);
     }
     if (!src || (jl_value_t*)src == jl_nothing) {
-        codeinst = jl_type_infer(mi, world, 0, SOURCE_MODE_FORCE_SOURCE_UNCACHED);
+        codeinst = jl_type_infer(params.compiler, mi, world, 0, SOURCE_MODE_FORCE_SOURCE_UNCACHED);
         if (codeinst) {
             src = (jl_code_info_t*)jl_atomic_load_relaxed(&codeinst->inferred);
         }
@@ -2007,6 +2004,7 @@ void jl_get_llvmf_defn_impl(jl_llvmf_dump_t* dump, jl_method_instance_t *mi, siz
         jl_codegen_params_t output(*ctx, std::move(target_info.first), std::move(target_info.second));
         output.params = &params;
         output.imaging_mode = imaging_default();
+        output.compiler = params.compiler;
         // This would be nice, but currently it causes some assembly regressions that make printed output
         // differ very significantly from the actual non-imaging mode code.
         // // Force imaging mode for names of pointers
