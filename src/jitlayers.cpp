@@ -204,6 +204,7 @@ static jl_callptr_t _jl_compile_codeinst(
     params.cache = true;
     params.imaging_mode = imaging_default();
     params.debug_level = jl_options.debug_level;
+    params.compiler = codeinst->owner;
     {
         orc::ThreadSafeModule result_m =
             jl_create_ts_module(name_from_method_instance(codeinst->def), params.tsctx, params.DL, params.TargetTriple);

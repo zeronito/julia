@@ -1937,6 +1937,7 @@ public:
     bool use_cache = false;
     bool external_linkage = false;
     const jl_cgparams_t *params = NULL;
+    jl_value_t *compiler = NULL;
 
     SmallVector<std::unique_ptr<Module>, 0> llvmcall_modules;
 
@@ -1948,7 +1949,8 @@ public:
         max_world(max_world),
         use_cache(params.cache),
         external_linkage(params.external_linkage),
-        params(params.params) {
+        params(params.params),
+        compiler(params.compiler) {
     }
 
     jl_codectx_t(LLVMContext &llvmctx, jl_codegen_params_t &params, jl_code_instance_t *ci) :
@@ -6001,6 +6003,7 @@ static std::pair<Function*, Function*> get_oc_function(jl_codectx_t &ctx, jl_met
     sigtype = jl_apply_tuple_type_v(jl_svec_data(sig_args), nsig);
 
     jl_method_instance_t *mi = jl_specializations_get_linfo(closure_method, sigtype, jl_emptysvec);
+    // TODO(VC)
     jl_code_instance_t *ci = (jl_code_instance_t*)jl_rettype_inferred(jl_nothing, mi, ctx.min_world, ctx.max_world);
 
     if (ci == NULL || (jl_value_t*)ci == jl_nothing) {
@@ -9688,7 +9691,7 @@ void jl_compile_workqueue(
                     jl_atomic_load_relaxed(&codeinst->inferred) == jl_nothing) {
                     // Codegen lock is held, so SOURCE_MODE_FORCE_SOURCE_UNCACHED is not required
 
-                    codeinst = jl_type_infer(params.params->compiler, codeinst->def, jl_atomic_load_relaxed(&codeinst->max_world), 0, SOURCE_MODE_FORCE_SOURCE);
+                    codeinst = jl_type_infer(codeinst->owner, codeinst->def, jl_atomic_load_relaxed(&codeinst->max_world), 0, SOURCE_MODE_FORCE_SOURCE);
                 }
                 if (codeinst) {
                     orc::ThreadSafeModule result_m =

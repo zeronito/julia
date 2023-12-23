@@ -360,6 +360,7 @@ void *jl_create_native_impl(jl_array_t *methods, LLVMOrcThreadSafeModuleRef llvm
     params.imaging_mode = imaging;
     params.debug_level = cgparams->debug_info_level;
     params.external_linkage = _external_linkage;
+    params.compiler = cgparams->compiler;
     size_t compile_for[] = { jl_typeinf_world, _world };
     for (int worlds = 0; worlds < 2; worlds++) {
         JL_TIMING(NATIVE_AOT, NATIVE_Codegen);
@@ -2003,6 +2004,7 @@ void jl_get_llvmf_defn_impl(jl_llvmf_dump_t* dump, jl_method_instance_t *mi, siz
         jl_codegen_params_t output(*ctx, std::move(target_info.first), std::move(target_info.second));
         output.params = &params;
         output.imaging_mode = imaging_default();
+        output.compiler = params.compiler;
         // This would be nice, but currently it causes some assembly regressions that make printed output
         // differ very significantly from the actual non-imaging mode code.
         // // Force imaging mode for names of pointers
