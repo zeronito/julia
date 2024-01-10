@@ -205,6 +205,9 @@ Return all documentation that matches both `binding` and `sig`.
 
 If `getdoc` returns a non-`nothing` result on the value of the binding, then a
 dynamic docstring is returned instead of one based on the binding itself.
+
+!!! compat "Julia 1.11"
+    In Julia 1.11 and newer, `Docs.doc` requires that the `REPL` stdlib is loaded.
 """
 function doc(binding::Binding, sig::Type = Union{})
     if defined(binding)
@@ -931,6 +934,9 @@ When `pattern` is a string, case is ignored. Results are printed to `io`.
 ```
 help?> "pattern"
 ```
+
+!!! compat "Julia 1.11"
+    In Julia 1.11 and newer, `apropos` requires that the `REPL` stdlib is loaded.
 """
 apropos(string) = apropos(stdout, string)
 apropos(io::IO, string) = apropos(io, Regex("\\Q$string", "i"))
