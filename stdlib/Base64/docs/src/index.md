@@ -2,6 +2,7 @@
 
 ```@docs
 Base64.Base64
+Base64.Base64Format
 Base64.Base64EncodePipe
 Base64.base64encode
 Base64.Base64DecodePipe
