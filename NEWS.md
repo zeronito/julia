@@ -93,6 +93,7 @@ New library features
   content is fully written, then call `closewrite` manually to avoid
   data-races. Or use the callback form of `open` to have all that handled
   automatically.
+* `propertynames(::Type)` now returns an empty tuple. To obtain the internal field names which were previously returned, use `propertynames(T, true)` ([#45300]).
 
 Standard library changes
 ------------------------
