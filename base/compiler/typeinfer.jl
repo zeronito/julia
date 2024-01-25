@@ -1178,6 +1178,8 @@ function typeinf_ext_toplevel(compiler::CompilerInstance, mi::MethodInstance, wo
     if compiler === nothing
         return typeinf_ext_toplevel(abstract_interpreter(compiler, world), mi, source_mode)
     else
+        # XXX: Instead of invokelatest we should freeze the world
+        #      Maybe primary_world(typeof(compiler).name.module)
         absint = invokelatest(abstract_interpreter, compiler, world)
         return invokelatest(typeinf_ext_toplevel, absint, mi, source_mode)
     end
