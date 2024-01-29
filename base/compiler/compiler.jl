@@ -48,6 +48,15 @@ function abstract_interpreter end
 
 abstract_interpreter(::Nothing, world::UInt) = NativeInterpreter(world)
 
+"""
+    compiler_world(::CompilerInstance)
+
+The compiler world to execute this compiler instance in.
+"""
+
+compiler_world(::Nothing) = unsafe_load(cglobal(:jl_typeinf_world, UInt))
+compiler_world(::AbstractCompiler) = get_world_counter() # equivalent to invokelatest
+
 # These types are used by reflection.jl and expr.jl too, so declare them here.
 # Note that `@assume_effects` is available only after loading namedtuple.jl.
 abstract type MethodTableView end
