@@ -2930,8 +2930,10 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
                         }
                     }
                     size_t last_age = jl_current_task->world_age;
+                    jl_value_t* last_compiler = jl_current_task->compiler;
                     // here we know we're calling specific builtin functions that work in world 1.
                     jl_current_task->world_age = 1;
+                    jl_current_task->compiler = jl_nothing;
                     jl_value_t *result;
                     JL_TRY {
                         result = jl_apply(v, n+1);
@@ -2940,6 +2942,7 @@ static jl_value_t *static_eval(jl_codectx_t &ctx, jl_value_t *ex)
                         result = NULL;
                     }
                     jl_current_task->world_age = last_age;
+                    jl_current_task->compiler = last_compiler;
                     JL_GC_POP();
                     return result;
                 }
