@@ -420,6 +420,7 @@ static void buildEarlyOptimizerPipeline(ModulePassManager &MPM, PassBuilder *PB,
         MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
     }
     MPM.addPass(GlobalDCEPass());
+    }
     MPM.addPass(AfterEarlyOptimizationMarkerPass());
 }
 
@@ -474,72 +475,76 @@ static void buildLoopOptimizerPipeline(FunctionPassManager &FPM, PassBuilder *PB
 
 static void buildScalarOptimizerPipeline(FunctionPassManager &FPM, PassBuilder *PB, OptimizationLevel O, const OptimizationOptions &options) JL_NOTSAFEPOINT {
     FPM.addPass(BeforeScalarOptimizationMarkerPass());
-    if (O.getSpeedupLevel() >= 2) {
-        JULIA_PASS(FPM.addPass(AllocOptPass()));
-#if JL_LLVM_VERSION >= 160000
-        FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
-#else
-        FPM.addPass(SROAPass());
-#endif
-        FPM.addPass(VectorCombinePass(/*TryEarlyFoldsOnly=*/true));
-        FPM.addPass(InstSimplifyPass());
-        FPM.addPass(GVNPass());
-        FPM.addPass(MemCpyOptPass());
-        FPM.addPass(SCCPPass());
-        FPM.addPass(BDCEPass());
-        FPM.addPass(CorrelatedValuePropagationPass());
-        FPM.addPass(ADCEPass());
-        FPM.addPass(IRCEPass());
-        FPM.addPass(InstCombinePass());
-        FPM.addPass(JumpThreadingPass());
-    }
-    if (O.getSpeedupLevel() >= 3) {
-        FPM.addPass(GVNPass());
-    }
-    if (O.getSpeedupLevel() >= 2) {
-        FPM.addPass(DSEPass());
-        invokePeepholeEPCallbacks(FPM, PB, O);
-        FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
-        JULIA_PASS(FPM.addPass(AllocOptPass()));
-        {
-            LoopPassManager LPM;
-            LPM.addPass(LICMPass(LICMOptions()));
-            LPM.addPass(JuliaLICMPass());
-            FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM), /*UseMemorySSA = */true));
+    if (options.enable_scalar_optimizations) {
+        if (O.getSpeedupLevel() >= 2) {
+            JULIA_PASS(FPM.addPass(AllocOptPass()));
+    #if JL_LLVM_VERSION >= 160000
+            FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+    #else
+            FPM.addPass(SROAPass());
+    #endif
+            FPM.addPass(VectorCombinePass(/*TryEarlyFoldsOnly=*/true));
+            FPM.addPass(InstSimplifyPass());
+            FPM.addPass(GVNPass());
+            FPM.addPass(MemCpyOptPass());
+            FPM.addPass(SCCPPass());
+            FPM.addPass(BDCEPass());
+            FPM.addPass(CorrelatedValuePropagationPass());
+            FPM.addPass(ADCEPass());
+            FPM.addPass(IRCEPass());
+            FPM.addPass(InstCombinePass());
+            FPM.addPass(JumpThreadingPass());
         }
-        FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
-        FPM.addPass(InstCombinePass());
+        if (O.getSpeedupLevel() >= 3) {
+            FPM.addPass(GVNPass());
+        }
+        if (O.getSpeedupLevel() >= 2) {
+            FPM.addPass(DSEPass());
+            invokePeepholeEPCallbacks(FPM, PB, O);
+            FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
+            JULIA_PASS(FPM.addPass(AllocOptPass()));
+            {
+                LoopPassManager LPM;
+                LPM.addPass(LICMPass(LICMOptions()));
+                LPM.addPass(JuliaLICMPass());
+                FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM), /*UseMemorySSA = */true));
+            }
+            FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
+            FPM.addPass(InstCombinePass());
+        }
+        invokeScalarOptimizerCallbacks(FPM, PB, O);
     }
-    invokeScalarOptimizerCallbacks(FPM, PB, O);
     FPM.addPass(AfterScalarOptimizationMarkerPass());
 }
 
 static void buildVectorPipeline(FunctionPassManager &FPM, PassBuilder *PB, OptimizationLevel O, const OptimizationOptions &options) JL_NOTSAFEPOINT {
     FPM.addPass(BeforeVectorizationMarkerPass());
-    //TODO look into loop vectorize options
-    // Rerotate loops that might have been unrotated in the simplification
-    LoopPassManager LPM;
-    LPM.addPass(LoopRotatePass());
-    LPM.addPass(LoopDeletionPass());
-    FPM.addPass(createFunctionToLoopPassAdaptor(
-      std::move(LPM), /*UseMemorySSA=*/false, /*UseBlockFrequencyInfo=*/false));
-    FPM.addPass(LoopDistributePass());
-    FPM.addPass(InjectTLIMappings());
-    FPM.addPass(LoopVectorizePass());
-    FPM.addPass(LoopLoadEliminationPass());
-    FPM.addPass(InstCombinePass());
-    FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
-    FPM.addPass(SLPVectorizerPass());
-    invokeVectorizerCallbacks(FPM, PB, O);
-    FPM.addPass(VectorCombinePass());
-    FPM.addPass(InstCombinePass());
-    //TODO add BDCEPass here?
-    // This unroll will unroll vectorized loops
-    // as well as loops that we tried but failed to vectorize
-    FPM.addPass(LoopUnrollPass(LoopUnrollOptions(O.getSpeedupLevel(), /*OnlyWhenForced = */ false, /*ForgetSCEV = */false)));
-    FPM.addPass(SROAPass(SROAOptions::PreserveCFG));
-    FPM.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), /*UseMemorySSA=*/true, /*UseBlockFrequencyInfo=*/false));
-    FPM.addPass(AfterVectorizationMarkerPass());
+    if (options.enable_vector_pipeline) {
+        //TODO look into loop vectorize options
+        // Rerotate loops that might have been unrotated in the simplification
+        LoopPassManager LPM;
+        LPM.addPass(LoopRotatePass());
+        LPM.addPass(LoopDeletionPass());
+        FPM.addPass(createFunctionToLoopPassAdaptor(
+        std::move(LPM), /*UseMemorySSA=*/false, /*UseBlockFrequencyInfo=*/false));
+        FPM.addPass(LoopDistributePass());
+        FPM.addPass(InjectTLIMappings());
+        FPM.addPass(LoopVectorizePass());
+        FPM.addPass(LoopLoadEliminationPass());
+        FPM.addPass(InstCombinePass());
+        FPM.addPass(SimplifyCFGPass(aggressiveSimplifyCFGOptions()));
+        FPM.addPass(SLPVectorizerPass());
+        invokeVectorizerCallbacks(FPM, PB, O);
+        FPM.addPass(VectorCombinePass());
+        FPM.addPass(InstCombinePass());
+        //TODO add BDCEPass here?
+        // This unroll will unroll vectorized loops
+        // as well as loops that we tried but failed to vectorize
+        FPM.addPass(LoopUnrollPass(LoopUnrollOptions(O.getSpeedupLevel(), /*OnlyWhenForced = */ false, /*ForgetSCEV = */false)));
+        FPM.addPass(SROAPass(SROAOptions::PreserveCFG));
+        FPM.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), /*UseMemorySSA=*/true, /*UseBlockFrequencyInfo=*/false));
+        FPM.addPass(AfterVectorizationMarkerPass());
+    }
 }
 
 static void buildIntrinsicLoweringPipeline(ModulePassManager &MPM, PassBuilder *PB, OptimizationLevel O, const OptimizationOptions &options) JL_NOTSAFEPOINT {
