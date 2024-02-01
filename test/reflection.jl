@@ -169,11 +169,11 @@ let
     @test Base.binding_module(TestMod7648, :d7648) == TestMod7648
     @test Base.binding_module(TestMod7648, :a9475) == TestMod7648.TestModSub9475
     @test Base.binding_module(TestMod7648.TestModSub9475, :b9475) == TestMod7648.TestModSub9475
-    @test Set(names(TestMod7648))==Set([:TestMod7648, :a9475, :foo9475, :c7648, :foo7648, :foo7648_nomethods, :Foo7648])
+    @test Set(names(TestMod7648))==Set([:a9475, :foo9475, :c7648, :foo7648, :foo7648_nomethods, :Foo7648])
     @test Set(names(TestMod7648, all = true)) == Set([:TestMod7648, :TestModSub9475, :a9475, :foo9475, :c7648, :d7648, :f7648,
                                                 :foo7648, Symbol("#foo7648"), :foo7648_nomethods, Symbol("#foo7648_nomethods"),
                                                 :Foo7648, :eval, Symbol("#eval"), :include, Symbol("#include")])
-    @test Set(names(TestMod7648, all = true, imported = true)) == Set([:TestMod7648, :TestModSub9475, :a9475, :foo9475, :c7648, :d7648, :f7648,
+    @test Set(names(TestMod7648, all = true, imported = true)) == Set([:TestModSub9475, :a9475, :foo9475, :c7648, :d7648, :f7648,
                                                       :foo7648, Symbol("#foo7648"), :foo7648_nomethods, Symbol("#foo7648_nomethods"),
                                                       :Foo7648, :eval, Symbol("#eval"), :include, Symbol("#include"),
                                                       :convert, :curmod_name, :curmod])
@@ -217,6 +217,7 @@ public this_is_public
 @test isexported(@__MODULE__, :this_is_not_defined)
 @test !isexported(@__MODULE__, :this_is_not_exported)
 @test !isexported(@__MODULE__, :this_is_public)
+@test !isexported(@__MODULE__, :TestingExported)
 const a_value = 1
 @test which(@__MODULE__, :a_value) === @__MODULE__
 @test_throws ErrorException("\"a_value\" is not defined in module Main") which(Main, :a_value)
@@ -226,6 +227,7 @@ const a_value = 1
 @test Base.ispublic(@__MODULE__, :this_is_not_defined)
 @test Base.ispublic(@__MODULE__, :this_is_public)
 @test !Base.ispublic(@__MODULE__, :this_is_not_exported)
+@test !Base.ispublic(@__MODULE__, :TestingExported)
 end
 
 # PR 13825
@@ -1130,7 +1132,7 @@ private() = 1
 
 end
 
-@test names(TestNames) == [:TestNames, :exported, :publicized]
+@test names(TestNames) == [:exported, :publicized]
 
 # reflections for generated function with abstract input types
 
@@ -1192,3 +1194,37 @@ end
 @test Base.isexported(Mod52812, :b)
 @test Base.ispublic(Mod52812, :a)
 @test Base.ispublic(Mod52812, :b)
+
+# `using Mod as M`
+module Mod52821
+
+using Test
+
+module M1
+    module M2
+        export f52821
+        f52821() = 7
+        g52821() = 8
+    end
+end
+
+@test_throws UndefVarError f52821()
+using .M1.M2 as Mod
+@test f52821() === 7 # Export mechanism works
+@test_throws UndefVarError g52821() # Unexported things don't get loaded
+@test !isdefined(@__MODULE__, :M2) # Does not load the name M2 into Main
+@test Mod === M1.M2 === Mod.M2 # Does load M2 under the aliased name
+const M2 = 4 # We can still use the name M2
+@test M2 == 4
+
+@test_throws UndefVarError mean([0])
+using Statistics as Stats
+@test mean([0]) == 0
+@test Stats.mean === mean
+@test Stats === Stats.Statistics
+@test_throws UndefVarError Statistics.mean([0])
+
+# combined "as" and "non-as"
+using Base, Statistics as Stats, Test, .M1.M2 as Mod, M1
+
+end

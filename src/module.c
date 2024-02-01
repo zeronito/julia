@@ -44,9 +44,10 @@ JL_DLLEXPORT jl_module_t *jl_new_module_(jl_sym_t *name, jl_module_t *parent, ui
     if (jl_core_module && default_names) {
         JL_GC_PUSH1(&m);
         jl_module_using(m, jl_core_module);
-        // export own name, so "using Foo" makes "Foo" itself visible
+        // import_module(m, jl_core_module, NULL);
+        // Do not export or publicize own name, "using Foo" already makes "Foo" itself
+        // visible and "using Foo as Bar" should not make the name "Foo" visible.
         jl_set_const(m, name, (jl_value_t*)m);
-        jl_module_public(m, name, 1);
         JL_GC_POP();
     }
     return m;
