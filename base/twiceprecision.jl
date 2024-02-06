@@ -112,7 +112,7 @@ julia> Float64(hi) + Float64(lo)
 ```
 """
 function mul12(x::T, y::T) where {T<:AbstractFloat}
-    (h, l) = Base.Math.two_mul(x, y)
+    (h, l) = Math.two_mul(x, y)
     ifelse(!isfinite(h), (h, h), (h, l))
 end
 mul12(x::T, y::T) where {T} = (p = x * y; (p, zero(p)))
@@ -476,9 +476,7 @@ end
 # This assumes that r.step has already been split so that (0:len-1)*r.step.hi is exact
 function unsafe_getindex(r::StepRangeLen{T,<:TwicePrecision,<:TwicePrecision}, i::Integer) where T
     # Very similar to _getindex_hiprec, but optimized to avoid a 2nd call to add12
-    @inline
-    i isa Bool && throw(ArgumentError("invalid index: $i of type Bool"))
-    u = i - r.offset
+    u = oftype(r.offset, i) - r.offset
     shift_hi, shift_lo = u*r.step.hi, u*r.step.lo
     x_hi, x_lo = add12(r.ref.hi, shift_hi)
     T(x_hi + (x_lo + (shift_lo + r.ref.lo)))
@@ -486,7 +484,7 @@ end
 
 function _getindex_hiprec(r::StepRangeLen{<:Any,<:TwicePrecision,<:TwicePrecision}, i::Integer)
     i isa Bool && throw(ArgumentError("invalid index: $i of type Bool"))
-    u = i - r.offset
+    u = oftype(r.offset, i) - r.offset
     shift_hi, shift_lo = u*r.step.hi, u*r.step.lo
     x_hi, x_lo = add12(r.ref.hi, shift_hi)
     x_hi, x_lo = add12(x_hi, x_lo + (shift_lo + r.ref.lo))

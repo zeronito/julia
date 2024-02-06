@@ -30,6 +30,9 @@ See also: [`objectid`](@ref), [`Dict`](@ref), [`Set`](@ref).
 hash(x::Any) = hash(x, zero(UInt))
 hash(w::WeakRef, h::UInt) = hash(w.value, h)
 
+# Types can't be deleted, so marking as total allows the compiler to look up the hash
+hash(T::Type, h::UInt) = hash_uint(3h - @assume_effects :total ccall(:jl_type_hash, UInt, (Any,), T))
+
 ## hashing general objects ##
 
 hash(@nospecialize(x), h::UInt) = hash_uint(3h - objectid(x))

@@ -7,7 +7,6 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/InstIterator.h>
-#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Transforms/Utils/Cloning.h>
@@ -336,18 +335,14 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
 
         GlobalVariable *NGV = cast<GlobalVariable>(VMap[GV]);
         if (GV->hasInitializer())
-            NGV->setInitializer(MapValue(GV->getInitializer(), VMap));
+            NGV->setInitializer(MapValue(GV->getInitializer(), VMap, RF_None, &TypeRemapper, &Materializer));
 
         SmallVector<std::pair<unsigned, MDNode *>, 1> MDs;
         GV->getAllMetadata(MDs);
         for (auto MD : MDs)
             NGV->addMetadata(
                     MD.first,
-#if JL_LLVM_VERSION >= 130000
                     *MapMetadata(MD.second, VMap));
-#else
-                    *MapMetadata(MD.second, VMap, RF_MoveDistinctMDs));
-#endif
 
         copyComdat(NGV, GV);
 
@@ -372,11 +367,7 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
                 NF,
                 F,
                 VMap,
-#if JL_LLVM_VERSION >= 130000
                 CloneFunctionChangeType::GlobalChanges,
-#else
-                /*ModuleLevelChanges=*/true,
-#endif
                 Returns,
                 "",
                 nullptr,
@@ -389,19 +380,10 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
         for (unsigned i = 0; i < Attrs.getNumAttrSets(); ++i) {
             for (Attribute::AttrKind TypedAttr :
                  {Attribute::ByVal, Attribute::StructRet, Attribute::ByRef}) {
-#if JL_LLVM_VERSION >= 140000
                 auto Attr = Attrs.getAttributeAtIndex(i, TypedAttr);
-#else
-                auto Attr = Attrs.getAttribute(i, TypedAttr);
-#endif
                 if (Type *Ty = Attr.getValueAsType()) {
-#if JL_LLVM_VERSION >= 140000
                     Attrs = Attrs.replaceAttributeTypeAtIndex(
                         C, i, TypedAttr, TypeRemapper.remapType(Ty));
-#else
-                    Attrs = Attrs.replaceAttributeType(
-                        C, i, TypedAttr, TypeRemapper.remapType(Ty));
-#endif
                     break;
                 }
             }
@@ -418,7 +400,7 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
     for (GlobalAlias *GA : Aliases) {
         GlobalAlias *NGA = cast<GlobalAlias>(VMap[GA]);
         if (const Constant *C = GA->getAliasee())
-            NGA->setAliasee(MapValue(C, VMap));
+            NGA->setAliasee(MapValue(C, VMap, RF_None, &TypeRemapper, &Materializer));
 
         GA->setAliasee(nullptr);
     }
@@ -441,7 +423,7 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
     for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE;) {
         Function *F = &*FI++;
         if (auto Remangled = Intrinsic::remangleIntrinsicFunction(F)) {
-            F->replaceAllUsesWith(Remangled.getValue());
+            F->replaceAllUsesWith(*Remangled);
             F->eraseFromParent();
         }
     }
@@ -450,42 +432,12 @@ bool removeAddrspaces(Module &M, AddrspaceRemapFunction ASRemapper)
 }
 
 
-struct RemoveAddrspacesPassLegacy : public ModulePass {
-    static char ID;
-    AddrspaceRemapFunction ASRemapper;
-    RemoveAddrspacesPassLegacy(
-            AddrspaceRemapFunction ASRemapper = removeAllAddrspaces)
-        : ModulePass(ID), ASRemapper(ASRemapper){};
-
-public:
-    bool runOnModule(Module &M) override {
-        bool modified = removeAddrspaces(M, ASRemapper);
-#ifdef JL_VERIFY_PASSES
-        assert(!verifyModule(M, &errs()));
-#endif
-        return modified;
-    }
-};
-
-char RemoveAddrspacesPassLegacy::ID = 0;
-static RegisterPass<RemoveAddrspacesPassLegacy>
-        X("RemoveAddrspaces",
-          "Remove IR address space information.",
-          false,
-          false);
-
-Pass *createRemoveAddrspacesPass(
-        AddrspaceRemapFunction ASRemapper = removeAllAddrspaces)
-{
-    return new RemoveAddrspacesPassLegacy(ASRemapper);
-}
-
 RemoveAddrspacesPass::RemoveAddrspacesPass() : RemoveAddrspacesPass(removeAllAddrspaces) {}
 
 PreservedAnalyses RemoveAddrspacesPass::run(Module &M, ModuleAnalysisManager &AM) {
     bool modified = removeAddrspaces(M, ASRemapper);
 #ifdef JL_VERIFY_PASSES
-    assert(!verifyModule(M, &errs()));
+    assert(!verifyLLVMIR(M));
 #endif
     if (modified) {
         return PreservedAnalyses::allInSet<CFGAnalyses>();
@@ -507,31 +459,7 @@ unsigned removeJuliaAddrspaces(unsigned AS)
         return AS;
 }
 
-struct RemoveJuliaAddrspacesPassLegacy : public ModulePass {
-    static char ID;
-    RemoveAddrspacesPassLegacy Pass;
-    RemoveJuliaAddrspacesPassLegacy() : ModulePass(ID), Pass(removeJuliaAddrspaces){};
-
-    bool runOnModule(Module &M) override { return Pass.runOnModule(M); }
-};
-
-char RemoveJuliaAddrspacesPassLegacy::ID = 0;
-static RegisterPass<RemoveJuliaAddrspacesPassLegacy>
-        Y("RemoveJuliaAddrspaces",
-          "Remove IR address space information.",
-          false,
-          false);
-
-Pass *createRemoveJuliaAddrspacesPass()
-{
-    return new RemoveJuliaAddrspacesPassLegacy();
-}
 
 PreservedAnalyses RemoveJuliaAddrspacesPass::run(Module &M, ModuleAnalysisManager &AM) {
     return RemoveAddrspacesPass(removeJuliaAddrspaces).run(M, AM);
-}
-
-extern "C" JL_DLLEXPORT void LLVMExtraAddRemoveJuliaAddrspacesPass_impl(LLVMPassManagerRef PM)
-{
-    unwrap(PM)->add(createRemoveJuliaAddrspacesPass());
 }
