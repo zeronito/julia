@@ -11,7 +11,7 @@ The code for lowering Julia AST to LLVM IR or interpreting it directly is in dir
 
 | File                             | Description                                                        |
 |:-------------------------------- |:------------------------------------------------------------------ |
-| `aotcompile.cpp`                 | Legacy pass manager pipeline, compiler C-interface entry           |
+| `aotcompile.cpp`                 | Compiler C-interface entry and object file emission           |
 | `builtins.c`                     | Builtin functions                                                  |
 | `ccall.cpp`                      | Lowering [`ccall`](@ref)                                           |
 | `cgutils.cpp`                    | Lowering utilities, notably for array and tuple accesses           |
@@ -75,7 +75,7 @@ implies that option by default.
 
 ## Passing options to LLVM
 
-You can pass options to LLVM via the environment variable `JULIA_LLVM_ARGS`.
+You can pass options to LLVM via the environment variable [`JULIA_LLVM_ARGS`](@ref JULIA_LLVM_ARGS).
 Here are example settings using `bash` syntax:
 
   * `export JULIA_LLVM_ARGS=-print-after-all` dumps IR after each pass.
@@ -136,7 +136,7 @@ environment. In addition, it exposes the `-julia` meta-pass, which runs the
 entire Julia pass-pipeline over the IR. As an example, to generate a system
 image with the old pass manager, one could do:
 ```
-opt -enable-new-pm=0 -load libjulia-codegen.so -julia -o opt.bc unopt.bc
+
 llc -o sys.o opt.bc
 cc -shared -o sys.so sys.o
 ```
@@ -341,8 +341,8 @@ ccall(:foo, Cvoid, (Ptr{Float64},), A)
 In lowering, the compiler will insert a conversion from the array to the
 pointer which drops the reference to the array value. However, we of course
 need to make sure that the array does stay alive while we're doing the
-[`ccall`](@ref). To understand how this is done, first recall the lowering of the
-above code:
+[`ccall`](@ref). To understand how this is done, lets look at a hypothetical
+approximate possible lowering of the above code:
 ```julia
 return $(Expr(:foreigncall, :(:foo), Cvoid, svec(Ptr{Float64}), 0, :(:ccall), Expr(:foreigncall, :(:jl_array_ptr), Ptr{Float64}, svec(Any), 0, :(:ccall), :(A)), :(A)))
 ```
