@@ -65,8 +65,11 @@ extern "C" {
 #define TAG_RELOC_METHODROOT   57
 #define TAG_BINDING            58
 #define TAG_MEMORYT            59
+#define TAG_METHODINSTROOT         60
+#define TAG_LONG_METHODINSTROOT    61
+#define TAG_RELOC_METHODINSTROOT   62
 
-#define LAST_TAG 59
+#define LAST_TAG 62
 
 #define write_uint8(s, n) ios_putc((n), (s))
 #define read_uint8(s) ((uint8_t)ios_getc((s)))

@@ -493,6 +493,9 @@ JL_DLLEXPORT jl_method_instance_t *jl_new_method_instance_uninit(void)
     mi->inInference = 0;
     mi->cache_with_orig = 0;
     jl_atomic_store_relaxed(&mi->precompiled, 0);
+    mi->roots = NULL;
+    mi->root_blocks = NULL;
+    mi->nroots_sysimg = 0;
     return mi;
 }
 
@@ -1225,6 +1228,18 @@ static void prepare_method_for_roots(jl_method_t *m, uint64_t modid)
     }
 }
 
+static void prepare_method_instance_for_roots(jl_method_instance_t *m, uint64_t modid)
+{
+    if (!m->roots) {
+        m->roots = jl_alloc_vec_any(0);
+        jl_gc_wb(m, m->roots);
+    }
+    if (!m->root_blocks && modid != 0) {
+        m->root_blocks = jl_alloc_array_1d(jl_array_uint64_type, 0);
+        jl_gc_wb(m, m->root_blocks);
+    }
+}
+
 // Add a single root with owner `mod` to a method
 JL_DLLEXPORT void jl_add_method_root(jl_method_t *m, jl_module_t *mod, jl_value_t* root)
 {
@@ -1238,6 +1253,23 @@ JL_DLLEXPORT void jl_add_method_root(jl_method_t *m, jl_module_t *mod, jl_value_
     prepare_method_for_roots(m, modid);
     if (current_root_id(m->root_blocks) != modid)
         add_root_block(m->root_blocks, modid, jl_array_nrows(m->roots));
+    jl_array_ptr_1d_push(m->roots, root);
+    JL_GC_POP();
+}
+
+// Add a single root with owner `mod` to a method instance
+JL_DLLEXPORT void jl_add_method_instance_root(jl_method_instance_t *m, jl_module_t *mod, jl_value_t* root)
+{
+    JL_GC_PUSH2(&m, &root);
+    uint64_t modid = 0;
+    if (mod) {
+        assert(jl_is_module(mod));
+        modid = mod->build_id.lo;
+    }
+    assert(jl_is_method_instance(m));
+    prepare_method_instance_for_roots(m, modid);
+    if (current_root_id(m->root_blocks) != modid)
+        add_root_block(m->root_blocks, modid, jl_array_len(m->roots));
     jl_array_ptr_1d_push(m->roots, root);
     JL_GC_POP();
 }
@@ -1269,6 +1301,19 @@ int get_root_reference(rle_reference *rr, jl_method_t *m, size_t i)
     return i < m->nroots_sysimg;
 }
 
+int get_root_reference_method_instance(rle_reference *rr, jl_method_instance_t *m, size_t i)
+{
+    if (!m->root_blocks) {
+        rr->key = 0;
+        rr->index = i;
+        return i < m->nroots_sysimg;
+    }
+    rle_index_to_reference(rr, i, (uint64_t*)jl_array_data(m->root_blocks), jl_array_len(m->root_blocks), 0);
+    if (rr->key)
+        return 1;
+    return i < m->nroots_sysimg;
+}
+
 // get a root, given its key and index relative to the key
 // this is the relocatable way to get a root from m->roots
 jl_value_t *lookup_root(jl_method_t *m, uint64_t key, int index)
@@ -1282,6 +1327,17 @@ jl_value_t *lookup_root(jl_method_t *m, uint64_t key, int index)
     return jl_array_ptr_ref(m->roots, i);
 }
 
+jl_value_t *lookup_root_method_instance(jl_method_instance_t *m, uint64_t key, int index)
+{
+    if (!m->root_blocks) {
+        assert(key == 0);
+        return jl_array_ptr_ref(m->roots, index);
+    }
+    rle_reference rr = {key, index};
+    size_t i = rle_reference_to_index(&rr, (uint64_t*)jl_array_data(m->root_blocks), jl_array_len(m->root_blocks), 0);
+    return jl_array_ptr_ref(m->roots, i);
+}
+
 // Count the number of roots added by module with id `key`
 int nroots_with_key(jl_method_t *m, uint64_t key)
 {
@@ -1292,6 +1348,23 @@ int nroots_with_key(jl_method_t *m, uint64_t key)
         return key == 0 ? nroots : 0;
     uint64_t *rletable = jl_array_data(m->root_blocks, uint64_t);
     size_t j, nblocks2 = jl_array_nrows(m->root_blocks);
+    int nwithkey = 0;
+    for (j = 0; j < nblocks2; j+=2) {
+        if (rletable[j] == key)
+            nwithkey += (j+3 < nblocks2 ? rletable[j+3] : nroots) - rletable[j+1];
+    }
+    return nwithkey;
+}
+
+int nroots_with_key_method_instance(jl_method_instance_t *m, uint64_t key)
+{
+    size_t nroots = 0;
+    if (m->roots)
+        nroots = jl_array_len(m->roots);
+    if (!m->root_blocks)
+        return key == 0 ? nroots : 0;
+    uint64_t *rletable = (uint64_t*)jl_array_data(m->root_blocks);
+    size_t j, nblocks2 = jl_array_len(m->root_blocks);
     int nwithkey = 0;
     for (j = 0; j < nblocks2; j+=2) {
         if (rletable[j] == key)

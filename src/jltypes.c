@@ -3265,7 +3265,7 @@ void jl_init_types(void) JL_GC_DISABLED
     jl_method_instance_type =
         jl_new_datatype(jl_symbol("MethodInstance"), core,
                         jl_any_type, jl_emptysvec,
-                        jl_perm_symsvec(10,
+                        jl_perm_symsvec(13,
                             "def",
                             "specTypes",
                             "sparam_vals",
@@ -3275,8 +3275,11 @@ void jl_init_types(void) JL_GC_DISABLED
                             "cache",
                             "inInference",
                             "cache_with_orig",
-                            "precompiled"),
-                        jl_svec(10,
+                            "precompiled",
+                            "roots", // !const
+                            "root_blocks", // !const
+                            "nroots_sysimg"),
+                        jl_svec(13,
                             jl_new_struct(jl_uniontype_type, jl_method_type, jl_module_type),
                             jl_any_type,
                             jl_simplevector_type,
@@ -3286,7 +3289,10 @@ void jl_init_types(void) JL_GC_DISABLED
                             jl_any_type,
                             jl_bool_type,
                             jl_bool_type,
-                            jl_bool_type),
+                            jl_bool_type,
+                            jl_array_any_type,
+                            jl_array_uint64_type,
+                            jl_int32_type),
                         jl_emptysvec,
                         0, 1, 3);
     // These fields should be constant, but Serialization wants to mutate them in initialization
