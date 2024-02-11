@@ -153,11 +153,10 @@ Standard library changes
 #### Profile
 
 #### Random
-* `rand` now supports sampling over `Tuple` types ([#35856], [#50251]).
-* `rand` now supports sampling over `Pair` types ([#28705]).
-* When seeding RNGs provided by `Random`, negative integer seeds can now be used ([#51416]).
-* Seedable random number generators from `Random` can now be seeded by a string, e.g.
-  `seed!(rng, "a random seed")` ([#51527]).
+* `rand` now supports sampling over `Tuple` types ([#35856], [#50251]) and `Pair` types ([#28705]),
+  e.g. `rand(Tuple{Int, Bool})`.
+* When seeding RNGs provided by `Random`, negative integer ([#51416]) and strings ([#51527]) can now
+  be used as seeds, e.g. `seed!(rng, "a random seed")`.
 
 #### REPL
 

@@ -11,7 +11,7 @@ using Random
 using Random.DSFMT
 
 using Random: default_rng, Sampler, SamplerRangeFast, SamplerRangeInt, SamplerRangeNDL, MT_CACHE_F, MT_CACHE_I
-using Random: jump_128, jump_192, jump_128!, jump_192!
+using Random: jump_128, jump_192, jump_128!, jump_192!, SeedHasher
 
 import Future # randjump
 
@@ -282,7 +282,7 @@ for f in (:<, :<=, :>, :>=, :(==), :(!=))
 end
 
 # test all rand APIs
-for rng in ([], [MersenneTwister(0)], [RandomDevice()], [Xoshiro()])
+for rng in ([], [MersenneTwister(0)], [RandomDevice()], [Xoshiro(0)], [SeedHasher(0)])
     realrng = rng == [] ? default_rng() : only(rng)
     ftypes = [Float16, Float32, Float64, FakeFloat64, BigFloat]
     cftypes = [ComplexF16, ComplexF32, ComplexF64, ftypes...]
@@ -436,7 +436,8 @@ function hist(X, n)
 end
 
 @testset "uniform distribution of floats" begin
-    for rng in [MersenneTwister(), RandomDevice(), Xoshiro()],
+    seed = rand(UInt128)
+    for rng in [MersenneTwister(seed), RandomDevice(), Xoshiro(seed), SeedHasher(seed)],
         T in [Float16, Float32, Float64, BigFloat],
         prec in (T == BigFloat ? [3, 53, 64, 100, 256, 1000] : [256])
 
@@ -463,7 +464,8 @@ end
         # but also for 3 linear combinations of positions (for the array version)
         lcs = unique!.([rand(1:n, 2), rand(1:n, 3), rand(1:n, 5)])
         aslcs = zeros(Int, 3)
-        for rng = (MersenneTwister(), RandomDevice(), Xoshiro())
+        seed = rand(UInt128)
+        for rng = (MersenneTwister(seed), RandomDevice(), Xoshiro(seed), SeedHasher(seed))
             for scalar = [false, true]
                 fill!(a, 0)
                 fill!(as, 0)
@@ -636,7 +638,8 @@ let seed = rand(UInt32, 10)
     @test r.seed == seed && r.seed !== seed
     let r2 = Future.randjump(r, big(10)^20)
         Random.seed!(r2)
-        @test seed == r.seed != r2.seed
+        @test seed == r.seed
+        @test !isequal(r.seed, r2.seed)
     end
     resize!(seed, 4)
     @test r.seed != seed
@@ -658,6 +661,7 @@ end
         @test Random.seed!(m..., typemax(UInt)) === m2
         @test Random.seed!(m..., typemax(UInt128)) === m2
         @test Random.seed!(m..., "a random seed") === m2
+        @test Random.seed!(m..., Random.default_rng()) === m2
     end
 end
 
@@ -711,7 +715,7 @@ end
     @test rand(m, Int) ∉ (a, b, c, d)
 end
 
-@testset "$RNG(seed) & Random.seed!(m::$RNG, seed) produce the same stream" for RNG=(MersenneTwister,Xoshiro)
+@testset "$RNG(seed) & Random.seed!(m::$RNG, seed) produce the same stream" for RNG=(MersenneTwister, Xoshiro)
     seeds = Any[0, 1, 2, 10000, 10001, rand(UInt32, 8), randstring(), randstring(), rand(UInt128, 3)...]
     if RNG == Xoshiro
         push!(seeds, rand(UInt64, rand(1:4)))
@@ -722,6 +726,11 @@ end
         Random.seed!(m, seed)
         @test a == [rand(m) for _=1:100]
     end
+    # rng as a seed
+    m = RNG(Xoshiro(0))
+    a = [rand(m) for _=1:100]
+    Random.seed!(m, Xoshiro(0))
+    @test a == [rand(m) for _=1:100]
 end
 
 @testset "Random.seed!(seed) sets Random.GLOBAL_SEED" begin
@@ -746,7 +755,10 @@ struct RandomStruct23964 end
     @test_throws MethodError rand(RandomStruct23964())
 end
 
-@testset "rand(::$(typeof(RNG)), ::UnitRange{$T}" for RNG ∈ (MersenneTwister(rand(UInt128)), RandomDevice(), Xoshiro()),
+@testset "rand(::$(typeof(RNG)), ::UnitRange{$T}" for RNG ∈ (MersenneTwister(rand(UInt128)),
+                                                             RandomDevice(),
+                                                             Xoshiro(rand(UInt128)),
+                                                             SeedHasher(rand(UInt128))),
                                                         T ∈ (Bool, Int8, Int16, Int32, UInt32, Int64, Int128, UInt128)
     if T === Bool
         @test rand(RNG, false:true) ∈ (false, true)
@@ -875,8 +887,11 @@ end
     @test rand(rng) == rand(GLOBAL_RNG)
 end
 
-@testset "RNGs broadcast as scalars: T" for T in (MersenneTwister, RandomDevice)
-    @test length.(rand.(T(), 1:3)) == 1:3
+@testset "RNGs broadcast as scalars: $(typeof(RNG))" for RNG in (MersenneTwister(0),
+                                                                 RandomDevice(),
+                                                                 Xoshiro(0),
+                                                                 SeedHasher(0))
+    @test length.(rand.(RNG, 1:3)) == 1:3
 end
 
 @testset "generated scalar integers do not overlap" begin
@@ -951,6 +966,16 @@ end
         @test string(m) == """MersenneTwister("seed 1", (0, 1002, 0, 1))"""
         # test that MersenneTwister's fancy constructors accept string seeds
         @test MersenneTwister("seed 1", (0, 1002, 0, 1)) == m
+
+        # RNG seeds
+        xo = Xoshiro(0)
+        Random.seed!(m, xo)
+        # test that the seed shows as `missing`
+        @test string(m) == "MersenneTwister(missing)"
+        rand(m)
+        @test string(m) == "MersenneTwister(missing, (0, 1002, 0, 1))"
+        @test_throws MethodError MersenneTwister(missing)
+        @test_throws MethodError MersenneTwister(missing, (0, 1002, 0, 1))
     end
 
     @testset "RandomDevice" begin
@@ -1187,7 +1212,7 @@ end
         T <: Signed && push!(seeds, T(0), T(1), T(2), T(-1), T(-2))
     end
 
-    vseeds = Dict{Vector{UInt8}, BigInt}()
+    vseeds = Dict{String, BigInt}()
     for seed = seeds
         bigseed = big(seed)
         vseed = Random.hash_seed(bigseed)
@@ -1211,7 +1236,7 @@ end
     seed_str = randstring()
     seed_gstr = GenericString(seed_str)
     @test Random.hash_seed(seed_str) == Random.hash_seed(seed_gstr)
-    string_seeds = Set{Vector{UInt8}}()
+    string_seeds = Set{String}()
     for ch = 'A':'z'
         vseed = Random.hash_seed(string(ch))
         @test vseed ∉ keys(vseeds)
