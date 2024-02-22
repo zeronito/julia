@@ -2370,6 +2370,7 @@ jl_code_instance_t *jl_method_compiled(jl_value_t *compiler, jl_method_instance_
             if (jl_atomic_load_relaxed(&codeinst->invoke) != NULL)
                 return codeinst;
         }
+        codeinst = jl_atomic_load_relaxed(&codeinst->next);
     }
     return NULL;
 }
