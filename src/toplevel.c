@@ -928,8 +928,9 @@ jl_value_t *jl_toplevel_eval_flex(jl_module_t *JL_NONNULL m, jl_value_t *e, int 
         // helps in common cases.
         size_t world = jl_atomic_load_acquire(&jl_world_counter);
         ct->world_age = world;
+        jl_value_t *compiler = ct->compiler;
         if (!has_defs && jl_get_module_infer(m) != 0) {
-            (void)jl_type_infer(jl_nothing, mfunc, world, 0, SOURCE_MODE_NOT_REQUIRED);
+            (void)jl_type_infer(compiler, mfunc, world, 0, SOURCE_MODE_NOT_REQUIRED);
         }
         result = jl_invoke(/*func*/NULL, /*args*/NULL, /*nargs*/0, mfunc);
         ct->world_age = last_age;

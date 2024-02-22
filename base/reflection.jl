@@ -1424,13 +1424,10 @@ struct CodegenParams
     use_jlplt::Cint
 
     """
-    A pointer of type
+    An instance of type Core.Compiler.CompilerInstance
 
-    typedef jl_value_t *(*jl_codeinstance_lookup_t)(jl_method_instance_t *mi JL_PROPAGATES_ROOT,
-    size_t min_world, size_t max_world);
-
-    that may be used by external compilers as a callback to look up the code instance corresponding
-    to a particular method instance.
+    Used to look up the code instance corresponding to a particular method instance,
+    from the particular compiler instance.
     """
     compiler::Core.Compiler.CompilerInstance
 

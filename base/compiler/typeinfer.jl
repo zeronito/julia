@@ -1173,10 +1173,6 @@ function typeinf_type(interp::AbstractInterpreter, mi::MethodInstance)
     return widenconst(ignorelimited(result.result))
 end
 
-function module_world(m::Module)
-    return ccall(:jl_module_world, Csize_t, (Any,), m)
-end
-
 # This is a bridge for the C code calling `jl_typeinf_func()`
 # typeinf_ext_toplevel is going to be executed within `jl_typeinf_world`
 function typeinf_ext_toplevel(compiler::CompilerInstance, mi::MethodInstance, world::UInt, source_mode::UInt8)

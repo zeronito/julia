@@ -305,7 +305,7 @@ static void jl_ci_cache_lookup(const jl_cgparams_t &cgparams, jl_method_instance
             *src_out = jl_uncompress_ir(def, codeinst, (jl_value_t*)*src_out);
     }
     if (*src_out == NULL || !jl_is_code_info(*src_out)) {
-        *ci_out = jl_type_infer(cgparams.compiler, mi, world, 0, SOURCE_MODE_ABI);
+        *ci_out = jl_type_infer(compiler, mi, world, 0, SOURCE_MODE_ABI);
     }
     *ci_out = codeinst;
 }

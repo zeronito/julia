@@ -1615,7 +1615,7 @@ extern "C" {
         /* safepoint_on_entry */ 1,
         /* gcstack_arg */ 1,
         /* use_jlplt*/ 1,
-        /* compiler */ NULL };
+        /* compiler */ NULL }; // defaults to jl_nothing, initialized after runtime.
 }
 
 
@@ -9693,7 +9693,6 @@ void jl_compile_workqueue(
                 if (policy != CompilationPolicy::Default &&
                     jl_atomic_load_relaxed(&codeinst->inferred) == jl_nothing) {
                     // Codegen lock is held, so SOURCE_MODE_FORCE_SOURCE_UNCACHED is not required
-
                     codeinst = jl_type_infer(codeinst->owner, codeinst->def, jl_atomic_load_relaxed(&codeinst->max_world), 0, SOURCE_MODE_FORCE_SOURCE);
                 }
                 if (codeinst) {
