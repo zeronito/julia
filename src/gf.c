@@ -2351,14 +2351,14 @@ jl_value_t *jl_rettype_inferred(jl_value_t *owner, jl_method_instance_t *mi, siz
 jl_code_instance_t *jl_method_compiled(jl_value_t *compiler, jl_method_instance_t *mi, size_t world)
 {
     jl_code_instance_t *codeinst = jl_atomic_load_relaxed(&mi->cache);
-    while (codeinst) {
+    for (; codeinst; codeinst = jl_atomic_load_relaxed(&codeinst->next)) {
         if (jl_atomic_load_relaxed(&codeinst->min_world) <= world &&
             world <= jl_atomic_load_relaxed(&codeinst->max_world) &&
-            jl_egal(codeinst->owner, compiler) ) {
+            jl_egal(codeinst->owner, compiler)) {
+
             if (jl_atomic_load_relaxed(&codeinst->invoke) != NULL)
                 return codeinst;
         }
-        codeinst = jl_atomic_load_relaxed(&codeinst->next);
     }
     return NULL;
 }
@@ -2368,10 +2368,10 @@ jl_code_instance_t *jl_method_inferred_with_abi(jl_value_t *compiler, jl_method_
 {
     jl_code_instance_t *codeinst = jl_atomic_load_relaxed(&mi->cache);
     for (; codeinst; codeinst = jl_atomic_load_relaxed(&codeinst->next)) {
-        if (jl_egal(codeinst->owner, compiler))
-            continue;
+        if (jl_atomic_load_relaxed(&codeinst->min_world) <= world &&
+            world <= jl_atomic_load_relaxed(&codeinst->max_world) &&
+            jl_egal(codeinst->owner, compiler)) {
 
-        if (jl_atomic_load_relaxed(&codeinst->min_world) <= world && world <= jl_atomic_load_relaxed(&codeinst->max_world)) {
             jl_value_t *code = jl_atomic_load_relaxed(&codeinst->inferred);
             if (code && (code != jl_nothing || (jl_atomic_load_relaxed(&codeinst->invoke) != NULL)))
                 return codeinst;
