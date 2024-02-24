@@ -305,7 +305,10 @@ documentation.
 
 #### Alternative approach: `test/Project.toml` file test specific dependencies
 
-In Julia 1.2 and later test dependencies can be declared in `test/Project.toml`. This is similar
+!!! compat
+    This method of adding test-specific dependencies is supported for all Julia 1.x releases since v1.2.
+    
+Test dependencies can alternatively be declared in `test/Project.toml`. This is similar
 to `test/` being a project but when running tests, Pkg will automatically merge `test/Project.toml`
 and the `Project.toml` to create the test environment.
 
