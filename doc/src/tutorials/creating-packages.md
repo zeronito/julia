@@ -277,7 +277,7 @@ test-specific dependencies, are available, see below.
 
 There are two ways of adding test-specific dependencies (dependencies that are not dependencies of the package but
 will still be available to load when the package is tested). If no `test/Project.toml` exists Pkg will default to
-use the `target` based test specific dependencies.
+using the `target` based test specific dependencies.
 
 #### `target` based test specific dependencies
 
