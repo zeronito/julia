@@ -282,7 +282,7 @@ using the `target` based test specific dependencies.
 #### `target` based test specific dependencies
 
 !!! compat
-    This older method of adding test-specific dependencies will be supported for all Julia 1.X releases.
+    This method of adding test-specific dependencies is supported for all Julia 1.x releases since v1.0.
 
 Using this method of adding test-specific dependencies, the packages are added under an `[extras]` section and to a test target.
 E.g. to add `Markdown` and `Test` as test dependencies, add the following to the projects `Project.toml` file:
