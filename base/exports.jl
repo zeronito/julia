@@ -540,6 +540,7 @@ export
     intersect,
     isdisjoint,
     isempty,
+    isfull,
     issubset,
     issetequal,
     keys,
