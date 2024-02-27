@@ -949,7 +949,7 @@ readdir(; join::Bool=false, sort::Bool=true) =
     readdir(join ? pwd() : ".", join=join, sort=sort)
 
 """
-    walkdir(dir; topdown=true, follow_symlinks=false, onerror=throw)
+    walkdir(dir; topdown=true, follow_symlinks=false, onerror=throw, filter=Returns(true))
 
 Return an iterator that walks the directory tree of a directory.
 The iterator returns a tuple containing `(rootpath, dirs, files)`.
@@ -957,6 +957,8 @@ The directory tree can be traversed top-down or bottom-up.
 If `walkdir` or `stat` encounters a `IOError` it will rethrow the error by default.
 A custom error handling function can be provided through `onerror` keyword argument.
 `onerror` is called with a `IOError` as argument.
+All directories for which `filter(path)` returns `false` will not be read,
+including the initial directory passed as first argument.
 
 See also: [`readdir`](@ref).
 
@@ -988,8 +990,17 @@ julia> (root, dirs, files) = first(itr)
 julia> (root, dirs, files) = first(itr)
 ("my/test/dir", String[], String[])
 ```
+
+!!! compat "Julia 1.9"
+    The `filter` keyword argument was added in Julia 1.9.
 """
-function walkdir(root; topdown=true, follow_symlinks=false, onerror=throw)
+function walkdir(
+    root;
+    topdown=true,
+    follow_symlinks=false,
+    onerror=throw,
+    filter=Returns(true)
+)
     function _walkdir(chnl, root)
         tryf(f, p) = try
                 f(p)
@@ -1002,6 +1013,7 @@ function walkdir(root; topdown=true, follow_symlinks=false, onerror=throw)
                 end
                 return
             end
+        filter(root) || return
         content = tryf(readdir, root)
         content === nothing && return
         dirs = Vector{eltype(content)}()
