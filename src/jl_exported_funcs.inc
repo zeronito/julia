@@ -569,6 +569,7 @@
     YY(LLVMExtraFPMAddFinalLowerGCPass) \
     YY(LLVMExtraLPMAddJuliaLICMPass) \
     YY(LLVMExtraLPMAddLowerSIMDLoopPass) \
+    YY(LLVMExtraFPMAddExpandAtomicModifyPass) \
     YY(JLJITGetLLVMOrcExecutionSession) \
     YY(JLJITGetJuliaOJIT) \
     YY(JLJITGetExternalJITDylib) \

@@ -321,7 +321,7 @@ public:
     bool runOnFunction(Function &F, bool *CFGModified = nullptr);
 
 private:
-    CallInst *pgcstack;
+    Value *pgcstack;
 
     void MaybeNoteDef(State &S, BBState &BBS, Value *Def, const ArrayRef<int> &SafepointsSoFar,
                       SmallVector<int, 1> &&RefinedPtr = SmallVector<int, 1>());
@@ -2731,7 +2731,10 @@ void LateLowerGCFrame::PlaceRootsAndUpdateCalls(SmallVectorImpl<int> &Colors, St
         auto pushGcframe = CallInst::Create(
             getOrDeclare(jl_intrinsics::pushGCFrame),
             {gcframe, ConstantInt::get(T_int32, 0)});
-        pushGcframe->insertAfter(pgcstack);
+        if (isa<Argument>(pgcstack))
+            pushGcframe->insertAfter(gcframe);
+        else
+            pushGcframe->insertAfter(cast<Instruction>(pgcstack));
 
         // Replace Allocas
         unsigned AllocaSlot = 2; // first two words are metadata
@@ -2835,9 +2838,6 @@ void LateLowerGCFrame::PlaceRootsAndUpdateCalls(SmallVectorImpl<int> &Colors, St
 bool LateLowerGCFrame::runOnFunction(Function &F, bool *CFGModified) {
     initAll(*F.getParent());
     LLVM_DEBUG(dbgs() << "GC ROOT PLACEMENT: Processing function " << F.getName() << "\n");
-    if (!pgcstack_getter && !adoptthread_func)
-        return CleanupIR(F, nullptr, CFGModified);
-
     pgcstack = getPGCstack(F);
     if (!pgcstack)
         return CleanupIR(F, nullptr, CFGModified);

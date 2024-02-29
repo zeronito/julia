@@ -2071,6 +2071,8 @@ static jl_cgval_t typed_load(jl_codectx_t &ctx, Value *ptr, Value *idx_0based, j
         return mark_julia_slot(intcast, jltype, NULL, ctx.tbaa().tbaa_stack);
 }
 
+static Function *emit_modifyhelper(jl_codectx_t &ctx2, const jl_cgval_t &cmp, const jl_cgval_t &modifyop, jl_value_t *jltype, Type *elty, const Twine &fname, bool gcstack_arg);
+
 static jl_cgval_t typed_store(jl_codectx_t &ctx,
         Value *ptr, jl_cgval_t rhs, jl_cgval_t cmp,
         jl_value_t *jltype, MDNode *tbaa, MDNode *aliasscope,
@@ -2203,6 +2205,34 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
         ai.decorateInst(store);
         instr = store;
     }
+    else if (ismodifyfield && modifyop && !needlock && Order != AtomicOrdering::NotAtomic && !isboxed && realelty == elty && !intcast && elty->isIntegerTy() && !jl_type_hasptr(jltype)) {
+        if (Order == AtomicOrdering::Unordered)
+            Order = AtomicOrdering::Monotonic;
+        bool gcstack_arg = JL_FEAT_TEST(ctx,gcstack_arg);
+        Function *op = emit_modifyhelper(ctx, cmp, *modifyop, jltype, elty, fname, gcstack_arg);
+        r = emit_unbox(ctx, realelty, rhs, jltype);
+        auto *store = ctx.builder.CreateAtomicRMW(AtomicRMWInst::Xchg, ptr, r, Align(alignment), Order);
+        setName(ctx.emission_context, store, "modify_atomicrmw");
+        jl_aliasinfo_t ai = jl_aliasinfo_t::fromTBAA(ctx, tbaa);
+        ai.noalias = MDNode::concatenate(aliasscope, ai.noalias);
+        ai.decorateInst(store);
+        std::string intr_name = gcstack_arg ? "julia.atomicmodify_swiftcc.ptr.i" : "julia.atomicmodify.i";
+        intr_name += utostr(cast<IntegerType>(elty)->getBitWidth());
+        if (gcstack_arg) {
+            FunctionCallee intr = jl_Module->getOrInsertFunction(intr_name, elty, ctx.pgcstack->getType(), op->getType(), elty);
+            if (auto *F = dyn_cast<Function>(intr.getCallee()))
+                F->setCallingConv(CallingConv::Swift);
+            CallInst *f = ctx.builder.CreateCall(intr, {ctx.pgcstack, op, store});
+            f->setCallingConv(CallingConv::Swift);
+            r = f;
+        }
+        else {
+            FunctionCallee intr = jl_Module->getOrInsertFunction(intr_name, elty, op->getType(), elty);
+            r = ctx.builder.CreateCall(intr, {op, store});
+        }
+        oldval = mark_julia_type(ctx, store, isboxed, jltype);
+        rhs = mark_julia_type(ctx, r, isboxed, jltype);
+    }
     else {
         // replacefield, modifyfield, swapfield, setfieldonce (isboxed && atomic)
         DoneBB = BasicBlock::Create(ctx.builder.getContext(), "done_xchg", ctx.f);
@@ -2278,7 +2308,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
         }
         if (ismodifyfield) {
             if (needlock)
-                emit_lockstate_value(ctx, needlock, false);
+                emit_lockstate_value(ctx, needlock, false); // unlock
             Value *realCompare = Compare;
             if (realelty != elty)
                 realCompare = ctx.builder.CreateTrunc(realCompare, realelty);
@@ -2306,7 +2336,7 @@ static jl_cgval_t typed_store(jl_codectx_t &ctx,
                     r = ctx.builder.CreateZExt(r, elty);
             }
             if (needlock)
-                emit_lockstate_value(ctx, needlock, true);
+                emit_lockstate_value(ctx, needlock, true); // relock
             cmp = oldval;
         }
         Value *Done;

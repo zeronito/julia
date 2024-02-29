@@ -18,6 +18,7 @@ FUNCTION_PASS("PropagateJuliaAddrspaces", PropagateJuliaAddrspacesPass, Propagat
 FUNCTION_PASS("LowerExcHandlers", LowerExcHandlersPass, LowerExcHandlersPass())
 FUNCTION_PASS("GCInvariantVerifier", GCInvariantVerifierPass, GCInvariantVerifierPass())
 FUNCTION_PASS("FinalLowerGC", FinalLowerGCPass, FinalLowerGCPass())
+FUNCTION_PASS("ExpandAtomicModify", ExpandAtomicModifyPass, ExpandAtomicModifyPass())
 #endif
 
 //Loop passes
