@@ -1537,6 +1537,11 @@ recognize a variable, it uses a limited set of characters (greatly extended by
 Unicode). `isidentifier()` makes it possible to query the parser directly
 whether a symbol contains valid characters.
 
+!!! compat "Julia 1.11"
+    In Julia 1.11 or later, `isidentifier` for `Symbol` arguments also requires the symbol to be
+    Unicode-normalized so that it is equivalent to the result of parsing a valid identifier string
+    into a `Symbol`.
+
 # Examples
 ```jldoctest
 julia> Meta.isidentifier(:x), Meta.isidentifier("1x")
@@ -1551,7 +1556,11 @@ function isidentifier(s::AbstractString)
     is_id_start_char(c) || return false
     return all(is_id_char, rest)
 end
-isidentifier(s::Symbol) = isidentifier(string(s))
+
+function isidentifier(s::Symbol)
+    str = string(s)
+    return !isidentifier(str) ? false : str == Unicode.normalize(str; stable=true, compose=true)
+end
 
 is_op_suffix_char(c::AbstractChar) = ccall(:jl_op_suffix_char, Cint, (UInt32,), c) != 0
 
