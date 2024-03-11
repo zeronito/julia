@@ -2081,6 +2081,33 @@ function abstract_throw(interp::AbstractInterpreter, argtypes::Vector{Any}, ::Ab
     return CallMeta(Union{}, exct, EFFECTS_THROWS, NoCallInfo())
 end
 
+function abstract_call_within(interp::AbstractInterpreter, (; fargs, argtypes)::ArgInfo, si::StmtInfo,
+                        sv::AbsIntState, max_methods::Int=get_max_methods(interp, sv))
+    if length(argtypes) < 2
+
+        return CallMeta(Union{}, Effects(), NoCallInfo())
+    end
+    CT = argtypes[2]
+    other_compiler = singleton_type(CT)
+    if other_compiler === nothing
+        if CT isa Const
+            other_compiler = CT.val
+        else
+            # Compiler is not a singleton type result may depend on runtime configuration
+            add_remark!(interp, sv, "Skipped call_within since compiler plugin not constant")
+            return CallMeta(Any, Effects(), NoCallInfo())
+        end
+    end
+    # Change world to one where our methods exist.
+    cworld = invokelatest(compiler_world, other_compiler)::UInt
+    other_interp = Core._call_in_world(cworld, abstract_interpreter, other_compiler, get_inference_world(interp))
+    other_fargs = fargs === nothing ? nothing : fargs[3:end]
+    other_arginfo = ArgInfo(other_fargs, argtypes[3:end])
+    call = Core._call_in_world(cworld, abstract_call, other_interp, other_arginfo, si, sv, max_methods)
+    # TODO: Edges? Effects?
+    return CallMeta(call.rt, call.exct, call.effects, WithinCallInfo(other_compiler, call.info))
+end
+
 # call where the function is known exactly
 function abstract_call_known(interp::AbstractInterpreter, @nospecialize(f),
         arginfo::ArgInfo, si::StmtInfo, sv::AbsIntState,
@@ -2101,6 +2128,8 @@ function abstract_call_known(interp::AbstractInterpreter, @nospecialize(f),
             return abstract_applicable(interp, argtypes, sv, max_methods)
         elseif f === throw
             return abstract_throw(interp, argtypes, sv)
+        elseif f === Core._call_within
+            return abstract_call_within(interp, arginfo, si, sv, max_methods)
         end
         rt = abstract_call_builtin(interp, f, arginfo, sv)
         ft = popfirst!(argtypes)

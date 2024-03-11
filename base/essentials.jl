@@ -1066,6 +1066,19 @@ function invoke_in_world(world::UInt, @nospecialize(f), @nospecialize args...; k
     return Core._call_in_world(world, Core.kwcall, kwargs, f, args...)
 end
 
+"""
+    invoke_within(compiler, f, args...; kwargs...)
+
+Call `f(args...; kwargs...)` within the compiler context provided by `compiler`.
+"""
+function invoke_within(compiler::Core.Compiler.CompilerInstance, @nospecialize(f), @nospecialize args...; kwargs...)
+    kwargs = Base.merge(NamedTuple(), kwargs)
+    if isempty(kwargs)
+        return Core._call_within(compiler, f, args...)
+    end
+    return Core._call_within(compiler, Core.kwcall, kwargs, f, args...)
+end
+
 inferencebarrier(@nospecialize(x)) = compilerbarrier(:type, x)
 
 """

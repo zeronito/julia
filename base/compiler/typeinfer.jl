@@ -1175,7 +1175,18 @@ function typeinf_type(interp::AbstractInterpreter, mi::MethodInstance)
 end
 
 # This is a bridge for the C code calling `jl_typeinf_func()`
-typeinf_ext_toplevel(mi::MethodInstance, world::UInt, source_mode::UInt8) = typeinf_ext_toplevel(NativeInterpreter(world), mi, source_mode)
+# typeinf_ext_toplevel is going to be executed within `jl_typeinf_world`
+function typeinf_ext_toplevel(compiler::CompilerInstance, mi::MethodInstance, world::UInt, source_mode::UInt8)
+    if compiler === nothing
+        return typeinf_ext_toplevel(abstract_interpreter(compiler, world), mi, source_mode)
+    else
+        # Change world to one where our methods exist.
+        cworld = invokelatest(compiler_world, compiler)::UInt
+        absint = Core._call_in_world(cworld, abstract_interpreter, compiler, world)
+        return Core._call_in_world(cworld, typeinf_ext_toplevel, absint, mi, source_mode)
+    end
+end
+
 function typeinf_ext_toplevel(interp::AbstractInterpreter, mi::MethodInstance, source_mode::UInt8)
     return typeinf_ext(interp, mi, source_mode)
 end
