@@ -52,5 +52,14 @@ let ir, _ = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}),
     @test length(ir.stmts) == 4
 end
 
+# XXX: should these be in `CustomMethodTables/test/runtests.jl`?
+using CustomMethodTables
+
+Base.Experimental.@MethodTable(CustomMT)
+Base.Experimental.@overlay CustomMT Base.sin(x::Float64) = Base.cos(x)
+
+overlay(f, args...) = CustomMethodTables.overlay(CustomMT, f, args...)
+@test overlay(sin, 1.0) == cos(1.0)
+
 empty!(Base.LOAD_PATH)
 append!(Base.LOAD_PATH, original_load_path)
