@@ -36,19 +36,19 @@ using MultilineFusion
 function multiline(A, B)
     C = A .* B
     D = C .+ A
- end
+end
 
 let A = ones(3,3)
     B = ones(3)
     @test (@inferred multiline_fusion(multiline, A, B))::Matrix{Float64} == multiline(A, B)
 end
 
-let ir, _ = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1"))
+let (ir, _) = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1"))
     @test length(ir.stmts) == 5
-    @test ir.stmts[2][:stmt].args[2] == GlobalRef(Base, materialize)
+    @test ir.stmts[2][:stmt].args[2] == GlobalRef(Base, :materialize)
 end
 
-let ir, _ = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1", interp=MultilineFusion.MLFInterp()))
+let (ir, _) = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1", interp=MultilineFusion.MLFInterp()))
     @test length(ir.stmts) == 4
 end
 

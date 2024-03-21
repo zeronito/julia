@@ -2086,7 +2086,7 @@ function abstract_call_within(interp::AbstractInterpreter, (; fargs, argtypes)::
         else
             # Compiler is not a singleton type result may depend on runtime configuration
             add_remark!(interp, sv, "Skipped call_within since compiler plugin not constant")
-            return CallMeta(Any, Effects(), NoCallInfo())
+            return CallMeta(Any, Any, Effects(), NoCallInfo())
         end
     end
     # Change world to one where our methods exist.
