@@ -45,7 +45,7 @@ end
 
 let (ir, _) = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1"))
     @test length(ir.stmts) == 5
-    @test ir.stmts[2][:stmt].args[2] == GlobalRef(Base, :materialize)
+    @test ir.stmts[2][:stmt].args[1] == GlobalRef(Base, :materialize)
 end
 
 let (ir, _) = only(Base.code_ircode(multiline, (Matrix{Float64}, Vector{Float64}), optimize_until="compact 1", interp=MultilineFusion.MLFInterp()))
