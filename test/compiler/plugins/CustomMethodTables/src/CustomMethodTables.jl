@@ -42,7 +42,7 @@ CC.OptimizationParams(interp::CMTInterp) = interp.opt_params
 CC.get_inference_world(interp::CMTInterp) = interp.world
 CC.get_inference_cache(interp::CMTInterp) = interp.inf_cache
 CC.cache_owner(interp::CMTInterp) = interp.compiler
-CC.method_table(interp::CMTInterp) = Core.Compiler.OverlayMethodTable(get_inference_world(interp), method_table(interp.compiler))
+CC.method_table(interp::CMTInterp) = Core.Compiler.OverlayMethodTable(CC.get_inference_world(interp), method_table(interp.compiler))
 
 # precompilation
 precompile(CC.abstract_interpreter, (CMTCompiler, UInt))

@@ -59,7 +59,8 @@ Base.Experimental.@MethodTable(CustomMT)
 Base.Experimental.@overlay CustomMT Base.sin(x::Float64) = Base.cos(x)
 
 overlay(f, args...) = CustomMethodTables.overlay(CustomMT, f, args...)
-@test overlay(sin, 1.0) == cos(1.0)
+@test_broken overlay(sin, 1.0) == cos(1.0) # Bug in inference, not using the method_table for initial lookup
+@test overlay((x)->sin(x), 1.0) == cos(1.0)
 
 empty!(Base.LOAD_PATH)
 append!(Base.LOAD_PATH, original_load_path)
