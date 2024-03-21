@@ -55,4 +55,4 @@ COMPILER_WORLD[] = Base.get_world_counter()
 COMPILER_WORLD[] = 0
 
 
-end # module Tracer
+end # module CustomMethodTables
