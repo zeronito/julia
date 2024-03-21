@@ -58,6 +58,7 @@ using CustomMethodTables
 Base.Experimental.@MethodTable(CustomMT)
 Base.Experimental.@overlay CustomMT Base.sin(x::Float64) = Base.cos(x)
 
+# FIXME: Currently doesn't infer and ends in "Skipped call_within since compiler plugin not constant"
 overlay(f, args...) = CustomMethodTables.overlay(CustomMT, f, args...)
 @test_broken overlay(sin, 1.0) == cos(1.0) # Bug in inference, not using the method_table for initial lookup
 @test overlay((x)->sin(x), 1.0) == cos(1.0)
