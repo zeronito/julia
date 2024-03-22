@@ -8,6 +8,7 @@
 
 #include <unistd.h>
 #include <getopt.h>
+
 #include "julia_assert.h"
 
 #ifdef _OS_WINDOWS_
@@ -17,6 +18,15 @@ char *shlib_ext = ".dylib";
 #else
 char *shlib_ext = ".so";
 #endif
+
+/* This simple hand-crafted tolower exists to avoid locale-dependent effects in
+ * behaviors (and utf8proc_tolower wasn't linking properly on all platforms) */
+static char ascii_tolower(char c)
+{
+    if ('A' <= c && c <= 'Z')
+        return c - 'A' + 'a';
+    return c;
+}
 
 static const char system_image_path[256] = "\0" JL_SYSTEM_IMAGE_PATH;
 JL_DLLEXPORT const char *jl_get_default_sysimg_path(void)
@@ -40,6 +50,8 @@ JL_DLLEXPORT void jl_init_options(void)
                         NULL, // cpu_target ("native", "core2", etc...)
                         0,    // nthreadpools
                         0,    // nthreads
+                        0,    // nmarkthreads
+                        0,    // nsweepthreads
                         NULL, // nthreads_per_pool
                         0,    // nprocs
                         NULL, // machine_file
@@ -86,6 +98,7 @@ JL_DLLEXPORT void jl_init_options(void)
                         0, // rr-detach
                         0, // strip-metadata
                         0, // strip-ir
+                        0, // permalloc_pkgimg
                         0, // heap-size-hint
     };
     jl_options_initialized = 1;
@@ -99,7 +112,7 @@ static const char opts[]  =
     " --help-hidden              Uncommon options not shown by `-h`\n\n"
 
     // startup options
-    " --project[={<dir>|@.}]     Set <dir> as the home project/environment\n"
+    " --project[={<dir>|@.}]     Set <dir> as the active project/environment\n"
     " -J, --sysimage <file>      Start up with the given system image file\n"
     " -H, --home <dir>           Set location of `julia` executable\n"
     " --startup-file={yes*|no}   Load `JULIA_DEPOT_PATH/config/startup.jl`; if `JULIA_DEPOT_PATH`\n"
@@ -107,14 +120,16 @@ static const char opts[]  =
     " --handle-signals={yes*|no} Enable or disable Julia's default signal handlers\n"
     " --sysimage-native-code={yes*|no}\n"
     "                            Use native code from system image if available\n"
-    " --compiled-modules={yes*|no}\n"
+    " --compiled-modules={yes*|no|existing|strict}\n"
     "                            Enable or disable incremental precompilation of modules\n"
-    " --pkgimages={yes*|no}\n"
+    " --pkgimages={yes*|no|existing}\n"
     "                            Enable or disable usage of native code caching in the form of pkgimages ($)\n\n"
 
     // actions
     " -e, --eval <expr>          Evaluate <expr>\n"
     " -E, --print <expr>         Evaluate <expr> and display the result\n"
+    " -m, --module <Package> [args]\n"
+    "                            Run entry point of `Package` (`@main` function) with `args'.\n"
     " -L, --load <file>          Load <file> immediately on all processors\n\n"
 
     // parallel options
@@ -128,6 +143,8 @@ static const char opts[]  =
     "                           interface if supported (Linux and Windows) or to the number of CPU\n"
     "                           threads if not supported (MacOS) or if process affinity is not\n"
     "                           configured, and sets M to 1.\n"
+    " --gcthreads=N[,M]         Use N threads for the mark phase of GC and M (0 or 1) threads for the concurrent sweeping phase of GC.\n"
+    "                           N is set to half of the number of compute threads and M is set to 0 if unspecified.\n"
     " -p, --procs {N|auto}      Integer value N launches N additional local worker processes\n"
     "                           \"auto\" launches as many workers as the number of local CPU threads (logical cores)\n"
     " --machine-file <file>     Run processes on hosts listed in <file>\n\n"
@@ -135,7 +152,8 @@ static const char opts[]  =
     // interactive options
     " -i, --interactive          Interactive mode; REPL runs and `isinteractive()` is true\n"
     " -q, --quiet                Quiet startup: no banner, suppress REPL warnings\n"
-    " --banner={yes|no|auto*}    Enable or disable startup banner\n"
+    " --banner={yes|no|short|auto*}\n"
+    "                            Enable or disable startup banner\n"
     " --color={yes|no|auto*}     Enable or disable color text\n"
     " --history-file={yes*|no}   Load or save history\n\n"
 
@@ -181,9 +199,9 @@ static const char opts[]  =
     "                            expressions. It first tries to use BugReporting.jl installed in current environment and\n"
     "                            fallbacks to the latest compatible BugReporting.jl if not. For more information, see\n"
     "                            --bug-report=help.\n\n"
-
-    " --heap-size-hint=<size>    Forces garbage collection if memory usage is higher than that value.\n"
-    "                            The memory hint might be specified in megabytes(500M) or gigabytes(1G)\n\n"
+    " --heap-size-hint=<size>    Forces garbage collection if memory usage is higher than the given value.\n"
+    "                            The value may be specified as a number of bytes, optionally in units of\n"
+    "                            KB, MB, GB, or TB, or as a percentage of physical memory with %.\n\n"
 ;
 
 static const char opts_hidden[]  =
@@ -207,6 +225,7 @@ static const char opts_hidden[]  =
     " --trace-compile={stderr,name}\n"
     "                          Print precompile statements for methods compiled during execution or save to a path\n"
     " --image-codegen          Force generate code in imaging mode\n"
+    " --permalloc-pkgimg={yes|no*} Copy the data section of package images into memory\n"
 ;
 
 JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
@@ -251,8 +270,10 @@ JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
            opt_strip_metadata,
            opt_strip_ir,
            opt_heap_size_hint,
+           opt_gc_threads,
+           opt_permalloc_pkgimg
     };
-    static const char* const shortopts = "+vhqH:e:E:L:J:C:it:p:O:g:";
+    static const char* const shortopts = "+vhqH:e:E:L:J:C:it:p:O:g:m:";
     static const struct option longopts[] = {
         // exposed command line options
         // NOTE: This set of required arguments need to be kept in sync
@@ -265,6 +286,7 @@ JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
         { "banner",          required_argument, 0, opt_banner },
         { "home",            required_argument, 0, 'H' },
         { "eval",            required_argument, 0, 'e' },
+        { "module",          required_argument, 0, 'm' },
         { "print",           required_argument, 0, 'E' },
         { "load",            required_argument, 0, 'L' },
         { "bug-report",      required_argument, 0, opt_bug_report },
@@ -275,6 +297,7 @@ JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
         { "cpu-target",      required_argument, 0, 'C' },
         { "procs",           required_argument, 0, 'p' },
         { "threads",         required_argument, 0, 't' },
+        { "gcthreads",       required_argument, 0, opt_gc_threads },
         { "machine-file",    required_argument, 0, opt_machine_file },
         { "project",         optional_argument, 0, opt_project },
         { "color",           required_argument, 0, opt_color },
@@ -309,6 +332,7 @@ JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
         { "rr-detach",       no_argument,       0, opt_rr_detach },
         { "strip-metadata",  no_argument,       0, opt_strip_metadata },
         { "strip-ir",        no_argument,       0, opt_strip_ir },
+        { "permalloc-pkgimg",required_argument, 0, opt_permalloc_pkgimg },
         { "heap-size-hint",  required_argument, 0, opt_heap_size_hint },
         { 0, 0, 0, 0 }
     };
@@ -322,7 +346,6 @@ JL_DLLEXPORT void jl_parse_opts(int *argcp, char ***argvp)
     const char **cmds = NULL;
     int codecov = JL_LOG_NONE;
     int malloclog = JL_LOG_NONE;
-    int pkgimage_explicit = 0;
     int argc = *argcp;
     char **argv = *argvp;
     char *endptr;
@@ -401,6 +424,7 @@ restart_switch:
         case 'e': // eval
         case 'E': // print
         case 'L': // load
+        case 'm': // module
         case opt_bug_report: // bug
         {
             size_t sz = strlen(optarg) + 1;
@@ -414,6 +438,10 @@ restart_switch:
             ncmds++;
             cmds[ncmds] = 0;
             jl_options.cmds = cmds;
+            if (c == 'm') {
+                optind -= 1;
+                goto parsing_args_done;
+            }
             break;
         }
         case 'J': // sysimage
@@ -434,8 +462,10 @@ restart_switch:
                 jl_options.banner = 0;
             else if (!strcmp(optarg, "auto"))
                 jl_options.banner = -1;
+            else if (!strcmp(optarg, "short"))
+                jl_options.banner = 2;
             else
-                jl_errorf("julia: invalid argument to --banner={yes|no|auto} (%s)", optarg);
+                jl_errorf("julia: invalid argument to --banner={yes|no|auto|short} (%s)", optarg);
             break;
         case opt_sysimage_native_code:
             if (!strcmp(optarg,"yes"))
@@ -450,17 +480,22 @@ restart_switch:
                 jl_options.use_compiled_modules = JL_OPTIONS_USE_COMPILED_MODULES_YES;
             else if (!strcmp(optarg,"no"))
                 jl_options.use_compiled_modules = JL_OPTIONS_USE_COMPILED_MODULES_NO;
+            else if (!strcmp(optarg,"existing"))
+                jl_options.use_compiled_modules = JL_OPTIONS_USE_COMPILED_MODULES_EXISTING;
+            else if (!strcmp(optarg,"strict"))
+                jl_options.use_compiled_modules = JL_OPTIONS_USE_COMPILED_MODULES_STRICT;
             else
-                jl_errorf("julia: invalid argument to --compiled-modules={yes|no} (%s)", optarg);
+                jl_errorf("julia: invalid argument to --compiled-modules={yes|no|existing|strict} (%s)", optarg);
             break;
         case opt_pkgimages:
-            pkgimage_explicit = 1;
             if (!strcmp(optarg,"yes"))
                 jl_options.use_pkgimages = JL_OPTIONS_USE_PKGIMAGES_YES;
             else if (!strcmp(optarg,"no"))
                 jl_options.use_pkgimages = JL_OPTIONS_USE_PKGIMAGES_NO;
+            else if (!strcmp(optarg,"existing"))
+                jl_options.use_pkgimages = JL_OPTIONS_USE_PKGIMAGES_EXISTING;
             else
-                jl_errorf("julia: invalid argument to --pkgimage={yes|no} (%s)", optarg);
+                jl_errorf("julia: invalid argument to --pkgimages={yes|no} (%s)", optarg);
             break;
         case 'C': // cpu-target
             jl_options.cpu_target = strdup(optarg);
@@ -784,50 +819,83 @@ restart_switch:
             break;
         case opt_heap_size_hint:
             if (optarg != NULL) {
-                size_t endof = strlen(optarg);
                 long double value = 0.0;
-                if (sscanf(optarg, "%Lf", &value) == 1 && value > 1e-7) {
-                    char unit = optarg[endof - 1];
-                    uint64_t multiplier = 1ull;
-                    switch (unit) {
-                        case 'k':
-                        case 'K':
-                            multiplier <<= 10;
-                            break;
-                        case 'm':
-                        case 'M':
-                            multiplier <<= 20;
-                            break;
-                        case 'g':
-                        case 'G':
-                            multiplier <<= 30;
-                            break;
-                        case 't':
-                        case 'T':
-                            multiplier <<= 40;
-                            break;
-                        default:
-                            break;
-                    }
-                    jl_options.heap_size_hint = (uint64_t)(value * multiplier);
+                char unit[4] = {0};
+                int nparsed = sscanf(optarg, "%Lf%3s", &value, unit);
+                if (nparsed == 0 || strlen(unit) > 2 || (strlen(unit) == 2 && ascii_tolower(unit[1]) != 'b')) {
+                    jl_errorf("julia: invalid argument to --heap-size-hint (%s)", optarg);
                 }
+                uint64_t multiplier = 1ull;
+                switch (ascii_tolower(unit[0])) {
+                    case '\0':
+                    case 'b':
+                        break;
+                    case 'k':
+                        multiplier <<= 10;
+                        break;
+                    case 'm':
+                        multiplier <<= 20;
+                        break;
+                    case 'g':
+                        multiplier <<= 30;
+                        break;
+                    case 't':
+                        multiplier <<= 40;
+                        break;
+                    case '%':
+                        if (value > 100)
+                            jl_errorf("julia: invalid percentage specified in --heap-size-hint");
+                        uint64_t mem = uv_get_total_memory();
+                        uint64_t cmem = uv_get_constrained_memory();
+                        if (cmem > 0 && cmem < mem)
+                            mem = cmem;
+                        multiplier = mem/100;
+                        break;
+                    default:
+                        jl_errorf("julia: invalid argument to --heap-size-hint (%s)", optarg);
+                        break;
+                }
+                long double sz = value * multiplier;
+                if (isnan(sz) || sz < 0) {
+                    jl_errorf("julia: invalid argument to --heap-size-hint (%s)", optarg);
+                }
+                const long double limit = ldexpl(1.0, 64); // UINT64_MAX + 1
+                jl_options.heap_size_hint = sz < limit ? (uint64_t)sz : UINT64_MAX;
             }
             if (jl_options.heap_size_hint == 0)
-                jl_errorf("julia: invalid argument to --heap-size-hint without memory size specified");
+                jl_errorf("julia: invalid memory size specified in --heap-size-hint");
 
+            break;
+        case opt_gc_threads:
+            errno = 0;
+            long nmarkthreads = strtol(optarg, &endptr, 10);
+            if (errno != 0 || optarg == endptr || nmarkthreads < 1 || nmarkthreads >= INT16_MAX) {
+                jl_errorf("julia: --gcthreads=<n>[,<m>]; n must be an integer >= 1");
+            }
+            jl_options.nmarkthreads = (int16_t)nmarkthreads;
+            if (*endptr == ',') {
+                errno = 0;
+                char *endptri;
+                long nsweepthreads = strtol(&endptr[1], &endptri, 10);
+                if (errno != 0 || endptri == &endptr[1] || *endptri != 0 || nsweepthreads < 0 || nsweepthreads > 1)
+                    jl_errorf("julia: --gcthreads=<n>,<m>; m must be 0 or 1");
+                jl_options.nsweepthreads = (int8_t)nsweepthreads;
+            }
+            break;
+        case opt_permalloc_pkgimg:
+            if (!strcmp(optarg,"yes"))
+                jl_options.permalloc_pkgimg = 1;
+            else if (!strcmp(optarg,"no"))
+                jl_options.permalloc_pkgimg = 0;
+            else
+                jl_errorf("julia: invalid argument to --permalloc-pkgimg={yes|no} (%s)", optarg);
             break;
         default:
             jl_errorf("julia: unhandled option -- %c\n"
                       "This is a bug, please report it.", c);
         }
     }
-    if (codecov || malloclog) {
-        if (pkgimage_explicit && jl_options.use_pkgimages) {
-            jl_errorf("julia: Can't use --pkgimages=yes together "
-                      "with --track-allocation or --code-coverage.");
-        }
-        jl_options.use_pkgimages = 0;
-    }
+    parsing_args_done:
     jl_options.code_coverage = codecov;
     jl_options.malloc_log = malloclog;
     int proc_args = *argcp < optind ? *argcp : optind;

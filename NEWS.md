@@ -1,4 +1,4 @@
-Julia v1.10 Release Notes
+Julia v1.12 Release Notes
 ========================
 
 New language features
@@ -7,116 +7,119 @@ New language features
 Language changes
 ----------------
 
+ - When methods are replaced with exactly equivalent ones, the old method is no
+   longer deleted implicitly simultaneously, although the new method does take
+   priority and become more specific than the old method. Thus if the new
+   method is deleted later, the old method will resume operating. This can be
+   useful to mocking frameworks (such as in SparseArrays, Pluto, and Mocking,
+   among others), as they do not need to explicitly restore the old method.
+   While inference and compilation still must be repeated with this, it also
+   may pave the way for inference to be able to intelligently re-use the old
+   results, once the new method is deleted. ([#53415])
+
+ - Macro expansion will no longer eargerly recurse into into `Expr(:toplevel)`
+   expressions returned from macros. Instead, macro expansion of `:toplevel`
+   expressions will be delayed until evaluation time. This allows a later
+   expression within a given `:toplevel` expression to make use of macros
+   defined earlier in the same `:toplevel` expression. ([#53515])
 
 Compiler/Runtime improvements
 -----------------------------
-* The `@pure` macro is now deprecated. Use `Base.@assume_effects :foldable` instead ([#48682]).
+
+- Generated LLVM IR now uses actual pointer types instead of passing pointers as integers.
+  This affects `llvmcall`: Inline LLVM IR should be updated to use `i8*` or `ptr` instead of
+  `i32` or `i64`, and remove unneeded `ptrtoint`/`inttoptr` conversions. For compatibility,
+  IR with integer pointers is still supported, but generates a deprecation warning. ([#53687])
 
 Command-line option changes
 ---------------------------
 
+* The `-m/--module` flag can be passed to run the `main` function inside a package with a set of arguments.
+  This `main` function should be declared using `@main` to indicate that it is an entry point.
 
 Multi-threading changes
 -----------------------
 
-
 Build system changes
 --------------------
 
-
 New library functions
 ---------------------
-* `tanpi` is now defined. It computes tan(πx) more accurately than `tan(pi*x)` ([#48575]).
+
+* `logrange(start, stop; length)` makes a range of constant ratio, instead of constant step ([#39071])
+* The new `isfull(c::Channel)` function can be used to check if `put!(c, some_value)` will block. ([#53159])
+* `waitany(tasks; throw=false)` and `waitall(tasks; failfast=false, throw=false)` which wait multiple tasks at once ([#53341]).
 
 New library features
 --------------------
-* The `initialized=true` keyword assignment for `sortperm!` and `partialsortperm!`
-  is now a no-op ([#47979]). It previously exposed unsafe behavior ([#47977]).
-* `binomial(x, k)` now supports non-integer `x` ([#48124]).
-* A `CartesianIndex` is now treated as a "scalar" for broadcasting ([#47044]).
-* `printstyled` now supports italic output ([#45164]).
+
+* `invmod(n, T)` where `T` is a native integer type now computes the modular inverse of `n` in the modular integer ring that `T` defines ([#52180]).
+* `invmod(n)` is an abbreviation for `invmod(n, typeof(n))` for native integer types ([#52180]).
+* `replace(string, pattern...)` now supports an optional `IO` argument to
+  write the output to a stream rather than returning a string ([#48625]).
+* `sizehint!(s, n)` now supports an optional `shrink` argument to disable shrinking ([#51929]).
+* New function `Docs.hasdoc(module, symbol)` tells whether a name has a docstring ([#52139]).
+* New function `Docs.undocumented_names(module)` returns a module's undocumented public names ([#52413]).
+* Passing an `IOBuffer` as a stdout argument for `Process` spawn now works as
+  expected, synchronized with `wait` or `success`, so a `Base.BufferStream` is
+  no longer required there for correctness to avoid data races ([#52461]).
+* After a process exits, `closewrite` will no longer be automatically called on
+  the stream passed to it. Call `wait` on the process instead to ensure the
+  content is fully written, then call `closewrite` manually to avoid
+  data-races. Or use the callback form of `open` to have all that handled
+  automatically.
+* `@timed` now additionally returns the elapsed compilation and recompilation time ([#52889])
+* `filter` can now act on a `NamedTuple` ([#50795]).
+* `tempname` can now take a suffix string to allow the file name to include a suffix and include that suffix in
+  the uniquing checking ([#53474])
+* `RegexMatch` objects can now be used to construct `NamedTuple`s and `Dict`s ([#50988])
 
 Standard library changes
 ------------------------
 
-* `startswith` now supports seekable `IO` streams ([#43055])
+#### StyledStrings
+
+#### JuliaSyntaxHighlighting
 
 #### Package Manager
 
-* "Package Extensions": support for loading a piece of code based on other
-  packages being loaded in the Julia session.
-  This has similar applications as the Requires.jl package but also
-  supports precompilation and setting compatibility.
-* `Pkg.precompile` now accepts `timing` as a keyword argument which displays per package timing information for precompilation (e.g. `Pkg.precompile(timing=true)`)
-
 #### LinearAlgebra
 
-* `AbstractQ` no longer subtypes to `AbstractMatrix`. Moreover, `adjoint(Q::AbstractQ)`
-  no longer wraps `Q` in an `Adjoint` type, but instead in an `AdjointQ`, that itself
-  subtypes `AbstractQ`. This change accounts for the fact that typically `AbstractQ`
-  instances behave like function-based, matrix-backed linear operators, and hence don't
-  allow for efficient indexing. Also, many `AbstractQ` types can act on vectors/matrices
-  of different size, acting like a matrix with context-dependent size. With this change,
-  `AbstractQ` has a well-defined API that is described in detail in the
-  [Julia documentation](https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/#man-linalg-abstractq)
-  ([#46196]).
-* Adjoints and transposes of `Factorization` objects are no longer wrapped in `Adjoint`
-  and `Transpose` wrappers, respectively. Instead, they are wrapped in
-  `AdjointFactorization` and `TranposeFactorization` types, which themselves subtype
-  `Factorization` ([#46874]).
-* New functions `hermitianpart` and `hermitianpart!` for extracting the Hermitian
-  (real symmetric) part of a matrix ([#31836]).
+#### Logging
 
 #### Printf
-* Format specifiers now support dynamic width and precision, e.g. `%*s` and `%*.*g` ([#40105]).
 
 #### Profile
 
-
 #### Random
-
 
 #### REPL
 
-
 #### SuiteSparse
-
 
 #### SparseArrays
 
-
 #### Test
-
-
-* The `@test_broken` macro (or `@test` with `broken=true`) now complains if the test expression returns a
-  non-boolean value in the same way as a non-broken test. ([#47804])
 
 #### Dates
 
+#### Statistics
 
 #### Distributed
 
-
 #### Unicode
-
 
 #### DelimitedFiles
 
-
 #### InteractiveUtils
-
- * `code_native` and `@code_native` now default to intel syntax instead of AT&T.
 
 Deprecated or removed
 ---------------------
 
-
 External dependencies
 ---------------------
 
-
 Tooling Improvements
 --------------------
-
 
 <!--- generated by NEWS-update.jl: -->
