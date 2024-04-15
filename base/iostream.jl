@@ -51,6 +51,9 @@ end
 
 Return the file descriptor backing an [`IOStream`](@ref), `File`, or socket.
 
+!!! compat "Julia 1.12"
+    Getting the file descriptor of sockets are supported as of Julia 1.12.
+
 !!! warning
     Duplicate the returned file descriptor with [`Libc.dup()`](@ref) before
     passing it to another system that will take ownership of it (e.g. a C
