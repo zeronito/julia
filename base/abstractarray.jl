@@ -3425,6 +3425,7 @@ map(f, A::AbstractArray) = collect_similar(A, Generator(f,A))
 mapany(f, A::AbstractArray) = map!(f, Vector{Any}(undef, length(A)), A)
 mapany(f, itr) = Any[f(x) for x in itr]
 
+# default to returning an Array for `map` on general iterators
 """
     map(f, c...) -> collection
 
@@ -3448,7 +3449,7 @@ julia> map(+, [1, 2, 3], [10, 20, 30, 400, 5000])
  33
 ```
 """
-map(f, A) = collect(Generator(f,A)) # default to returning an Array for `map` on general iterators
+map(f, A) = collect(Generator(f,A))
 
 map(f, ::AbstractDict) = error("map is not defined on dictionaries")
 map(f, ::AbstractSet) = error("map is not defined on sets")
