@@ -62,11 +62,8 @@ In other cases, `Vector{UInt8}` data may be copied, but `v` is truncated anyway
 to guarantee consistent behavior.
 """
 String(v::AbstractVector{UInt8}) = String(copyto!(StringMemory(length(v)), v))
-function String(v::Memory{UInt8})
-    len = length(v)
-    len == 0 && return ""
-    return ccall(:jl_genericmemory_to_string, Ref{String}, (Any, Int), v, len)
-end
+String(v::Memory{UInt8}) = take_string!(copy(v))
+
 function String(v::Vector{UInt8})
     #return ccall(:jl_array_to_string, Ref{String}, (Any,), v)
     len = length(v)
@@ -81,6 +78,36 @@ function String(v::Vector{UInt8})
     setfield!(v, :size, (0,))
     setfield!(v, :ref, memoryref(Memory{UInt8}()))
     return str
+end
+
+"""
+    take_string!(v::Union{Memory{UInt8}, Vector{UInt8}}) -> String
+
+Create a string, truncating `v` to zero length. If `v` is a `Vector`, further
+modification of `v` will not modify the string.
+When possible, the returned string will reuse the memory of `v`.
+
+# Examples
+```jldoctest
+julia> v = Memory{UInt8}([0x61, 0x62, 0x63]);
+
+julia> s = take_string!(v)
+"abc"
+
+julia> isempty(v)
+true
+```
+"""
+function take_string!(v::Memory{UInt8})
+    len = length(v)
+    len == 0 && return ""
+    return ccall(:jl_genericmemory_to_string, Ref{String}, (Any, Int), v, len)
+end
+
+# Note: Currently, this constructor truncates for Vector, but not for AbstractVector.
+# See issue 32528
+function take_string!(v::Vector{UInt8})
+    String(v)
 end
 
 """

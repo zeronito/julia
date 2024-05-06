@@ -103,6 +103,7 @@ New library features
 * `RegexMatch` objects can now be used to construct `NamedTuple`s and `Dict`s ([#50988])
 * `Lockable` is now exported ([#54595])
 * New `ltruncate`, `rtruncate` and `ctruncate` functions for truncating strings to text width, accounting for char widths ([#55351])
+* `take_string!(v)` creates a `String` from `v`, truncating `v` and reusing its memory if possible.
 
 Standard library changes
 ------------------------
