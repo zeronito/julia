@@ -498,8 +498,7 @@ end
 
 function InferenceState(result::InferenceResult, cache_mode::UInt8, interp::AbstractInterpreter)
     # prepare an InferenceState object for inferring lambda
-    world = get_inference_world(interp)
-    src = retrieve_code_info(result.linfo, world)
+    src = retrieve_code_info(interp, result.linfo)
     src === nothing && return nothing
     maybe_validate_code(result.linfo, src, "lowered")
     return InferenceState(result, src, cache_mode, interp)

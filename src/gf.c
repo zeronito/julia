@@ -2512,7 +2512,7 @@ jl_code_instance_t *jl_compile_method_internal(jl_value_t *compiler, jl_method_i
     // if that didn't work and compilation is off, try running in the interpreter
     if (compile_option == JL_OPTIONS_COMPILE_OFF ||
         compile_option == JL_OPTIONS_COMPILE_MIN) {
-        jl_code_info_t *src = jl_code_for_interpreter(mi, world);
+        jl_code_info_t *src = jl_code_for_interpreter(compiler, mi, world);
         if (!jl_code_requires_compiler(src, 0)) {
             jl_code_instance_t *codeinst = jl_new_codeinst(mi, compiler,
                 (jl_value_t*)jl_any_type, (jl_value_t*)jl_any_type, NULL, NULL,
@@ -3092,6 +3092,7 @@ STATIC_INLINE jl_method_instance_t *jl_lookup_generic_(jl_value_t *F, jl_value_t
     if (i == 4) {
         // if no method was found in the associative cache, check the full cache
         JL_TIMING(METHOD_LOOKUP_FAST, METHOD_LOOKUP_FAST);
+        // TODO: ct->compiler different mt?
         mt = jl_gf_mtable(F);
         jl_genericmemory_t *leafcache = jl_atomic_load_relaxed(&mt->leafcache);
         entry = NULL;

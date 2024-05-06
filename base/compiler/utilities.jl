@@ -127,7 +127,13 @@ function get_staged(mi::MethodInstance, world::UInt)
     end
 end
 
-function retrieve_code_info(linfo::MethodInstance, world::UInt)
+# Called from `jl_code_for_interpreter`
+function retrieve_code_info(compiler::CompilerInstance, linfo::MethodInstance, world::UInt64)
+    retrieve_code_info(abstract_interpreter(compiler, world), linfo)
+end
+
+function retrieve_code_info(interp::AbstractInterpreter, linfo::MethodInstance)
+    world = get_inference_world(interp)
     def = linfo.def
     if !isa(def, Method)
         return linfo.uninferred

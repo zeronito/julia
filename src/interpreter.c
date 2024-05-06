@@ -681,9 +681,34 @@ static jl_value_t *eval_body(jl_array_t *stmts, interpreter_state *s, size_t ip,
 
 // preparing method IR for interpreter
 
-jl_code_info_t *jl_code_for_interpreter(jl_method_instance_t *mi, size_t world)
+jl_code_info_t *jl_code_for_interpreter(jl_value_t *compiler, jl_method_instance_t *mi, size_t world)
 {
-    jl_code_info_t *src = (jl_code_info_t*)jl_atomic_load_relaxed(&mi->uninferred);
+    jl_code_info_t *src = NULL;
+    if (compiler != jl_nothing) {
+        jl_task_t *ct = jl_current_task;
+        jl_value_t **fargs;
+        JL_GC_PUSHARGS(fargs, 4);
+        fargs[0] = jl_get_global(
+            (jl_module_t*) jl_get_global(jl_core_module , jl_symbol("Compiler")),
+                           jl_symbol("retrieve_code_info"));
+        fargs[1] = compiler;
+        fargs[2] = (jl_value_t*)mi;
+        fargs[3] = jl_box_ulong(world);
+        size_t last_age = ct->world_age;
+        jl_value_t *last_compiler = ct->compiler;
+        JL_TRY {
+            ct->compiler = jl_nothing; // switch to native
+            src = (jl_code_info_t*)jl_apply(fargs, 4);
+        }
+        JL_CATCH {
+            src = NULL;
+        }
+        ct->compiler = last_compiler;
+        ct->world_age = last_age;
+        JL_GC_POP();
+        return src;
+    }
+    src = (jl_code_info_t*)jl_atomic_load_relaxed(&mi->uninferred);
     if (jl_is_method(mi->def.value)) {
         if (!src || (jl_value_t*)src == jl_nothing) {
             if (mi->def.method->source) {
@@ -716,7 +741,7 @@ jl_value_t *NOINLINE jl_fptr_interpret_call(jl_value_t *f, jl_value_t **args, ui
     jl_method_instance_t *mi = codeinst->def;
     jl_task_t *ct = jl_current_task;
     size_t world = ct->world_age;
-    jl_code_info_t *src = jl_code_for_interpreter(mi, world);
+    jl_code_info_t *src = jl_code_for_interpreter(ct->compiler, mi, world);
     jl_array_t *stmts = src->code;
     assert(jl_typetagis(stmts, jl_array_any_type));
     unsigned nroots = jl_source_nslots(src) + jl_source_nssavalues(src) + 2;

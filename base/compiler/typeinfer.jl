@@ -1112,7 +1112,7 @@ function typeinf_ext(interp::AbstractInterpreter, mi::MethodInstance, source_mod
     def = mi.def
     if isa(def, Method)
         if ccall(:jl_get_module_infer, Cint, (Any,), def.module) == 0 && !generating_output(#=incremental=#false)
-            src = retrieve_code_info(mi, get_inference_world(interp))
+            src = retrieve_code_info(interp, mi)
             return CodeInstance(mi, cache_owner(interp), Any, Any, nothing, src, Int32(0),
                 get_inference_world(interp), get_inference_world(interp),
                 UInt32(0), UInt32(0), nothing, UInt8(0))

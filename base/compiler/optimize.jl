@@ -193,8 +193,7 @@ function OptimizationState(linfo::MethodInstance, src::CodeInfo, interp::Abstrac
     return OptimizationState(linfo, src, nothing, stmt_info, mod, sptypes, slottypes, inlining, cfg, unreachable, bb_vartables, false)
 end
 function OptimizationState(linfo::MethodInstance, interp::AbstractInterpreter)
-    world = get_inference_world(interp)
-    src = retrieve_code_info(linfo, world)
+    src = retrieve_code_info(interp, linfo)
     src === nothing && return nothing
     return OptimizationState(linfo, src, interp)
 end
