@@ -34,7 +34,7 @@ Base.SubstitutionString
 Base.@s_str
 Base.@raw_str
 Base.@b_str
-Base.take_string!
+Base.takestring!
 Base.Docs.@html_str
 Base.Docs.@text_str
 Base.isvalid(::Any)
