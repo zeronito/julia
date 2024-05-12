@@ -54,6 +54,17 @@ bufcontents(io::Base.GenericIOBuffer) = unsafe_string(pointer(io.data), io.size)
     @test_throws ArgumentError seek(io, 0)
 end
 
+@testset "takestring!" begin
+    buf = IOBuffer()
+    write(buf, "abcø")
+    s = takestring!(buf)
+    @test isempty(takestring!(buf))
+    @test s == "abcø"
+    write(buf, "xyz")
+    @test takestring!(buf) == "xyz"
+    buf = IOBuffer()
+end
+
 @testset "Read/write readonly IOBuffer" begin
     io = IOBuffer("hamster\nguinea pig\nturtle")
     @test position(io) == 0
