@@ -704,8 +704,7 @@ jl_value_t *jl_code_or_ci_for_interpreter(jl_method_instance_t *mi, size_t world
             ret = (jl_value_t*)src;
         }
         else {
-            jl_code_instance_t *cache = jl_atomic_load_relaxed(&mi->cache);
-            jl_code_instance_t *uninferred = jl_cached_uninferred(cache, world);
+            jl_code_instance_t *uninferred = jl_cached_uninferred(mi, world);
             if (!uninferred) {
                 assert(mi->def.method->generator);
                 src = jl_code_for_staged(mi, world, &uninferred);
@@ -715,7 +714,7 @@ jl_value_t *jl_code_or_ci_for_interpreter(jl_method_instance_t *mi, size_t world
         }
     }
     else {
-        jl_code_instance_t *uninferred = jl_cached_uninferred(jl_atomic_load_relaxed(&mi->cache), world);
+        jl_code_instance_t *uninferred = jl_cached_uninferred(mi, world);
         ret = (jl_value_t*)uninferred;
         if (ret) {
             src = (jl_code_info_t*)jl_atomic_load_relaxed(&uninferred->inferred);
@@ -778,7 +777,7 @@ jl_value_t *NOINLINE jl_fptr_interpret_call(jl_value_t *f, jl_value_t **args, ui
             s->locals[defargs - 1] = jl_f_tuple(NULL, &args[defargs - 2], nargs + 2 - defargs);
         }
     }
-    s->sparam_vals = mi->sparam_vals;
+    s->sparam_vals = jl_mi_default_spec_data(mi)->sparam_vals;
     s->preevaluation = 0;
     s->continue_at = 0;
     s->mi = mi;

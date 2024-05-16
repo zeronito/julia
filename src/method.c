@@ -609,17 +609,28 @@ JL_DLLEXPORT jl_method_instance_t *jl_new_method_instance_uninit(void)
 {
     jl_task_t *ct = jl_current_task;
     jl_method_instance_t *mi =
-        (jl_method_instance_t*)jl_gc_alloc(ct->ptls, sizeof(jl_method_instance_t),
+        (jl_method_instance_t*)jl_gc_alloc(ct->ptls, jl_datatype_size(jl_method_instance_type),
                                            jl_method_instance_type);
     mi->def.value = NULL;
     mi->specTypes = NULL;
-    mi->sparam_vals = jl_emptysvec;
+    mi->next = NULL;
+    jl_mi_default_spec_data(mi)->sparam_vals = jl_emptysvec;
     mi->backedges = NULL;
     jl_atomic_store_relaxed(&mi->cache, NULL);
-    mi->inInference = 0;
-    mi->cache_with_orig = 0;
-    jl_atomic_store_relaxed(&mi->precompiled, 0);
+    jl_mi_default_spec_data(mi)->inInference = 0;
+    jl_mi_default_spec_data(mi)->cache_with_orig = 0;
+    jl_atomic_store_relaxed(&jl_mi_default_spec_data(mi)->precompiled, 0);
     return mi;
+}
+
+JL_DLLEXPORT void jl_lock_mi(jl_method_instance_t *mi)
+{
+    jl_mi_default_spec_data(mi)->inInference = 1;
+}
+
+JL_DLLEXPORT void jl_unlock_mi(jl_method_instance_t *mi)
+{
+    jl_mi_default_spec_data(mi)->inInference = 0;
 }
 
 JL_DLLEXPORT jl_code_info_t *jl_new_code_info_uninit(void)
@@ -689,13 +700,15 @@ JL_DLLEXPORT jl_code_info_t *jl_expand_and_resolve(jl_value_t *ex, jl_module_t *
     return func;
 }
 
-JL_DLLEXPORT jl_code_instance_t *jl_cached_uninferred(jl_code_instance_t *codeinst, size_t world)
+JL_DLLEXPORT jl_code_instance_t *jl_cached_uninferred(jl_method_instance_t *mi, size_t world)
 {
-    for (; codeinst; codeinst = jl_atomic_load_relaxed(&codeinst->next)) {
-        if (codeinst->owner != (void*)jl_uninferred_sym)
+    for (; mi; mi = jl_atomic_load_relaxed(&mi->next)) {
+        if (jl_typeof(mi) != (jl_value_t*)jl_method_uninferred_spec_type)
             continue;
-        if (jl_atomic_load_relaxed(&codeinst->min_world) <= world && world <= jl_atomic_load_relaxed(&codeinst->max_world)) {
-            return codeinst;
+        for (jl_code_instance_t *codeinst = jl_atomic_load_relaxed(&mi->cache); codeinst; codeinst = jl_atomic_load_relaxed(&codeinst->next)) {
+            if (jl_atomic_load_relaxed(&codeinst->min_world) <= world && world <= jl_atomic_load_relaxed(&codeinst->max_world)) {
+                return codeinst;
+            }
         }
     }
     return NULL;
@@ -703,26 +716,40 @@ JL_DLLEXPORT jl_code_instance_t *jl_cached_uninferred(jl_code_instance_t *codein
 
 JL_DLLEXPORT jl_code_instance_t *jl_cache_uninferred(jl_method_instance_t *mi, jl_code_instance_t *checked, size_t world, jl_code_instance_t *newci)
 {
-    while (!jl_mi_try_insert(mi, checked, newci)) {
-        jl_code_instance_t *new_checked = jl_atomic_load_relaxed(&mi->cache);
+    jl_method_instance_t *lastmi = mi;
+    jl_method_instance_t *uninferred_mi = mi;
+    while (1) {
+        for (; uninferred_mi; uninferred_mi = jl_atomic_load_relaxed(&uninferred_mi->next)) {
+            lastmi = uninferred_mi;
+            if (jl_typeof(uninferred_mi) != (jl_value_t*)jl_method_uninferred_spec_type)
+                continue;
+        }
+        if (uninferred_mi) {
+            break;
+        }
+        jl_method_instance_t *newmi = (jl_method_instance_t*)jl_new_struct_uninit(jl_method_uninferred_spec_type);
+        newmi->def = mi->def;
+        newmi->specTypes = mi->specTypes;
+        if (jl_atomic_cmpswap_acqrel(&lastmi->next, &uninferred_mi, newmi)) {
+            uninferred_mi = newmi;
+            break;
+        }
+    }
+    while (!jl_mi_try_insert(uninferred_mi, NULL, newci)) {
         // Check if another thread inserted a CodeInstance that covers this world
-        jl_code_instance_t *other = jl_cached_uninferred(new_checked, world);
+        jl_code_instance_t *other = jl_cached_uninferred(uninferred_mi, world);
         if (other)
             return other;
-        checked = new_checked;
     }
     // Successfully inserted
     return newci;
 }
 
-
-
 // Return a newly allocated CodeInfo for the function signature
 // effectively described by the tuple (specTypes, env, Method) inside linfo
 JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *mi, size_t world, jl_code_instance_t **cache)
 {
-    jl_code_instance_t *cache_ci = jl_atomic_load_relaxed(&mi->cache);
-    jl_code_instance_t *uninferred_ci = jl_cached_uninferred(cache_ci, world);
+    jl_code_instance_t *uninferred_ci = jl_cached_uninferred(mi, world);
     if (uninferred_ci) {
         // The uninferred code is in `inferred`, but that is a bit of a misnomer here.
         // This is the cached output the generated function (or top-level thunk).
@@ -758,17 +785,18 @@ JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *mi, size_t
 
         // invoke code generator
         jl_tupletype_t *ttdt = (jl_tupletype_t*)jl_unwrap_unionall(tt);
-        ex = jl_call_staged(def, generator, world, mi->sparam_vals, jl_svec_data(ttdt->parameters), jl_nparams(ttdt));
+        jl_svec_t *sparams = jl_mi_default_spec_data(mi)->sparam_vals;
+        ex = jl_call_staged(def, generator, world, sparams, jl_svec_data(ttdt->parameters), jl_nparams(ttdt));
 
         // do some post-processing
         if (jl_is_code_info(ex)) {
             func = (jl_code_info_t*)ex;
             jl_array_t *stmts = (jl_array_t*)func->code;
-            jl_resolve_globals_in_ir(stmts, def->module, mi->sparam_vals, 1);
+            jl_resolve_globals_in_ir(stmts, def->module, sparams, 1);
         }
         else {
             // Lower the user's expression and resolve references to the type parameters
-            func = jl_expand_and_resolve(ex, def->module, mi->sparam_vals);
+            func = jl_expand_and_resolve(ex, def->module, sparams);
             if (!jl_is_code_info(func)) {
                 if (jl_is_expr(func) && ((jl_expr_t*)func)->head == jl_error_sym) {
                     ct->ptls->in_pure_callback = 0;
@@ -813,7 +841,7 @@ JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *mi, size_t
                 }
             }
 
-            jl_code_instance_t *cached_ci = jl_cache_uninferred(mi, cache_ci, world, ci);
+            jl_code_instance_t *cached_ci = jl_cache_uninferred(mi, NULL, world, ci);
             if (cached_ci != ci) {
                 func = (jl_code_info_t*)jl_copy_ast(jl_atomic_load_relaxed(&cached_ci->inferred));
                 assert(jl_is_code_info(func));
@@ -852,7 +880,7 @@ jl_method_instance_t *jl_get_specialized(jl_method_t *m, jl_value_t *types, jl_s
     jl_method_instance_t *new_linfo = jl_new_method_instance_uninit();
     new_linfo->def.method = m;
     new_linfo->specTypes = types;
-    new_linfo->sparam_vals = sp;
+    jl_mi_default_spec_data(new_linfo)->sparam_vals = sp;
     return new_linfo;
 }
 

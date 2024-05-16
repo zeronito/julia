@@ -3,17 +3,35 @@
 """
     struct InternalCodeCache
 
-Internally, each `MethodInstance` keep a unique global cache of code instances
-that have been created for the given method instance, stratified by world age
-ranges. This struct abstracts over access to this cache.
+The internal code cache is keyed on type specializations, represented by
+MethodSpecialization{DefaultSpec} aka MethodInstance. External abstract
+interpreters may use this same structure by using a different `Spec` for their
+`MethodSpecialization{Spec}`. `InternalCodeCache` will match such specializations
+by type. Additionally, it is possible to specialize methods on properties other
+than types, but this requires custom caching logic. `InternalCodeCache` currently
+only supports type-based specialization.
 """
 struct InternalCodeCache
-    owner::Any # `jl_egal` is used for comparison
+    mitype::DataType # <: MethodSpecialization, but stored as DataType for efficient ===
+    InternalCodeCache(T::Type{<:MethodSpecialization}) =
+        new(T)
 end
+InternalCodeCache() = InternalCodeCache(MethodInstance)
 
 function setindex!(cache::InternalCodeCache, ci::CodeInstance, mi::MethodInstance)
-    @assert ci.owner === cache.owner
-    ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), mi, ci)
+    ms::MethodSpecialization = mi
+    while typeof(ms) !== cache.mitype
+        if !isdefined(ms, :next)
+            # No specialization for this spec. Try to allocate it now.
+            newms = cache.mitype(mi.def, mi.specTypes)
+            if @atomiconce :sequentially_consistent (ms.next = newms)
+                ms = newms
+                break
+            end
+        end
+        ms = @atomic :acquire ms.next
+    end
+    ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), ms, ci)
     return cache
 end
 
@@ -50,11 +68,21 @@ WorldView(wvc::WorldView, wr::WorldRange) = WorldView(wvc.cache, wr)
 WorldView(wvc::WorldView, args...) = WorldView(wvc.cache, args...)
 
 function haskey(wvc::WorldView{InternalCodeCache}, mi::MethodInstance)
-    return ccall(:jl_rettype_inferred, Any, (Any, Any, UInt, UInt), wvc.cache.owner, mi, first(wvc.worlds), last(wvc.worlds)) !== nothing
+    ms::MethodSpecialization = mi
+    while typeof(ms) !== wvc.cache.mitype
+        isdefined(ms, :next) || return false
+        ms = ms.next
+    end
+    return ccall(:jl_rettype_inferred, Any, (Any, UInt, UInt), ms, first(wvc.worlds), last(wvc.worlds)) !== nothing
 end
 
 function get(wvc::WorldView{InternalCodeCache}, mi::MethodInstance, default)
-    r = ccall(:jl_rettype_inferred, Any, (Any, Any, UInt, UInt), wvc.cache.owner, mi, first(wvc.worlds), last(wvc.worlds))
+    ms::MethodSpecialization = mi
+    while typeof(ms) !== wvc.cache.mitype
+        isdefined(ms, :next) || return default
+        ms = ms.next
+    end
+    r = ccall(:jl_rettype_inferred, Any, (Any, UInt, UInt), ms, first(wvc.worlds), last(wvc.worlds))
     if r === nothing
         return default
     end
@@ -73,7 +101,7 @@ function setindex!(wvc::WorldView{InternalCodeCache}, ci::CodeInstance, mi::Meth
 end
 
 function code_cache(interp::AbstractInterpreter)
-    cache = InternalCodeCache(cache_owner(interp))
+    cache = InternalCodeCache()
     worlds = WorldRange(get_inference_world(interp))
     return WorldView(cache, worlds)
 end

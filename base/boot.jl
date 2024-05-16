@@ -486,6 +486,8 @@ eval(Core, quote
     PartialOpaque(@nospecialize(typ), @nospecialize(env), parent::MethodInstance, source) = $(Expr(:new, :PartialOpaque, :typ, :env, :parent, :source))
     InterConditional(slot::Int, @nospecialize(thentype), @nospecialize(elsetype)) = $(Expr(:new, :InterConditional, :slot, :thentype, :elsetype))
     MethodMatch(@nospecialize(spec_types), sparams::SimpleVector, method::Method, fully_covers::Bool) = $(Expr(:new, :MethodMatch, :spec_types, :sparams, :method, :fully_covers))
+    DefaultSpec(sparam_vals::SimpleVector, inInference::Bool, cache_with_orig::Bool, precompiled::Bool) =
+        $(Expr(:new, DefaultSpec, :sparam_vals, :inInference, :cache_with_orig, :precompiled))
 end)
 
 const NullDebugInfo = DebugInfo(:none)
@@ -499,15 +501,14 @@ struct LineInfoNode # legacy support for aiding Serializer.deserialize of old IR
     LineInfoNode(mod::Module, @nospecialize(method), file::Symbol, line::Int32, inlined_at::Int32) = new(mod, method, file, line, inlined_at)
 end
 
-
 function CodeInstance(
-    mi::MethodInstance, owner, @nospecialize(rettype), @nospecialize(exctype), @nospecialize(inferred_const),
+    mi::MethodSpecialization, @nospecialize(rettype), @nospecialize(exctype), @nospecialize(inferred_const),
     @nospecialize(inferred), const_flags::Int32, min_world::UInt, max_world::UInt,
     ipo_effects::UInt32, effects::UInt32, @nospecialize(analysis_results),
     relocatability::UInt8, edges::DebugInfo)
     return ccall(:jl_new_codeinst, Ref{CodeInstance},
-        (Any, Any, Any, Any, Any, Any, Int32, UInt, UInt, UInt32, UInt32, Any, UInt8, Any),
-        mi, owner, rettype, exctype, inferred_const, inferred, const_flags, min_world, max_world,
+        (Any, Any, Any, Any, Any, Int32, UInt, UInt, UInt32, UInt32, Any, UInt8, Any),
+        mi, rettype, exctype, inferred_const, inferred, const_flags, min_world, max_world,
         ipo_effects, effects, analysis_results, relocatability, edges)
 end
 GlobalRef(m::Module, s::Symbol) = ccall(:jl_module_globalref, Ref{GlobalRef}, (Any, Any), m, s)
@@ -647,12 +648,12 @@ Symbol(s::Symbol) = s
 # module providing the IR object model
 module IR
 
-export CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
+export CodeInfo, MethodSpecialization, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
     PiNode, PhiNode, PhiCNode, UpsilonNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
 
-using Core: CodeInfo, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
+using Core: CodeInfo, MethodSpecialization, MethodInstance, CodeInstance, GotoNode, GotoIfNot, ReturnNode,
     NewvarNode, SSAValue, SlotNumber, Argument,
     PiNode, PhiNode, PhiCNode, UpsilonNode, DebugInfo,
     Const, PartialStruct, InterConditional, EnterNode
@@ -1003,6 +1004,9 @@ const check_top_bit = check_sign_bit
 # For convenience
 EnterNode(old::EnterNode, new_dest::Int) = isdefined(old, :scope) ?
     EnterNode(new_dest, old.scope) : EnterNode(new_dest)
+
+eval(Core, :((MS::Type{<:MethodSpecialization})(def::Union{Method, Module, MethodSpecialization}, abi::Type{<:Tuple}) =
+    $(Expr(:new, :MS, :def, :abi))))
 
 include(Core, "optimized_generics.jl")
 

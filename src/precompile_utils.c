@@ -182,10 +182,7 @@ static int precompile_enq_specialization_(jl_method_instance_t *mi, void *closur
     jl_code_instance_t *codeinst = jl_atomic_load_relaxed(&mi->cache);
     while (codeinst) {
         int do_compile = 0;
-        if (codeinst->owner != jl_nothing) {
-            // TODO(vchuravy) native code caching for foreign interpreters
-        }
-        else if (jl_atomic_load_relaxed(&codeinst->invoke) != jl_fptr_const_return) {
+        if (jl_atomic_load_relaxed(&codeinst->invoke) != jl_fptr_const_return) {
             jl_value_t *inferred = jl_atomic_load_relaxed(&codeinst->inferred);
             if (inferred &&
                 inferred != jl_nothing &&
@@ -251,7 +248,7 @@ static void *jl_precompile_(jl_array_t *m, int external_linkage)
             mi = (jl_method_instance_t*)item;
             size_t min_world = 0;
             size_t max_world = ~(size_t)0;
-            if (mi != jl_atomic_load_relaxed(&mi->def.method->unspecialized) && !jl_isa_compileable_sig((jl_tupletype_t*)mi->specTypes, mi->sparam_vals, mi->def.method))
+            if (mi != jl_atomic_load_relaxed(&mi->def.method->unspecialized) && !jl_isa_compileable_sig((jl_tupletype_t*)mi->specTypes, jl_mi_default_spec_data(mi)->sparam_vals, mi->def.method))
                 mi = jl_get_specialization1((jl_tupletype_t*)mi->specTypes, jl_atomic_load_acquire(&jl_world_counter), &min_world, &max_world, 0);
             if (mi)
                 jl_array_ptr_1d_push(m2, (jl_value_t*)mi);

@@ -2273,12 +2273,12 @@ static jl_svec_t *inst_ftypes(jl_svec_t *p, jl_typeenv_t *env, jl_typestack_t *s
     size_t i;
     size_t lp = jl_svec_len(p);
     jl_svec_t *np = jl_alloc_svec(lp);
-    jl_value_t *pi = NULL;
+    jl_value_t *orig_pi = NULL, *pi = NULL;
     JL_GC_PUSH2(&np, &pi);
     for (i = 0; i < lp; i++) {
-        pi = jl_svecref(p, i);
+        orig_pi = jl_svecref(p, i);
         JL_TRY {
-            pi = inst_type_w_(pi, env, stack, 1);
+            pi = inst_type_w_(orig_pi, env, stack, 1);
             if (!jl_is_type(pi) && !jl_is_typevar(pi)) {
                 pi = jl_bottom_type;
             }
@@ -2286,7 +2286,9 @@ static jl_svec_t *inst_ftypes(jl_svec_t *p, jl_typeenv_t *env, jl_typestack_t *s
         JL_CATCH {
             pi = jl_bottom_type;
         }
-        jl_value_t *globalpi = jl_as_global_root(pi, cacheable);
+        jl_value_t *globalpi = NULL;
+        if (orig_pi != pi)
+            globalpi = jl_as_global_root(pi, cacheable);
         jl_svecset(np, i, globalpi ? globalpi : pi);
     }
     JL_GC_POP();
@@ -3284,42 +3286,62 @@ void jl_init_types(void) JL_GC_DISABLED
     const static uint32_t method_atomicfields[1] = { 0x00000030 }; // (1<<4)|(1<<5)
     jl_method_type->name->atomicfields = method_atomicfields;
 
-    jl_method_instance_type =
-        jl_new_datatype(jl_symbol("MethodInstance"), core,
-                        jl_any_type, jl_emptysvec,
-                        jl_perm_symsvec(8,
+    jl_default_spec_type =
+        jl_new_datatype(jl_symbol("DefaultSpec"), core,
+            jl_any_type, jl_emptysvec,
+            jl_perm_symsvec(4,
+                "sparam_vals",
+                "inInference",
+                "cache_with_orig",
+                "precompiled"),
+            jl_svec(4,
+                jl_simplevector_type,
+                jl_bool_type,
+                jl_bool_type,
+                jl_bool_type),
+            jl_emptysvec, 0, 0, 4);
+
+    jl_datatype_t *uninferred_spec_type =
+        jl_new_datatype(jl_symbol("UninferredSpec"), core,
+            jl_any_type, jl_emptysvec,
+            jl_emptysvec,
+            jl_emptysvec,
+            jl_emptysvec, 0, 0, 0);
+
+    tv = jl_svec1(tvar("D"));
+    jl_datatype_t *jl_meth_spec_type =
+        jl_new_datatype(jl_symbol("MethodSpecialization"), core,
+                        jl_any_type, tv,
+                        jl_perm_symsvec(6,
                             "def",
                             "specTypes",
-                            "sparam_vals",
                             "backedges",
                             "cache",
-                            "inInference",
-                            "cache_with_orig",
-                            "precompiled"),
-                        jl_svec(8,
-                            jl_new_struct(jl_uniontype_type, jl_method_type, jl_module_type),
+                            "next",
+                            "data"),
+                        jl_svec(6,
+                            jl_any_type, // Union{Method, Module, MethodSpecialization}
                             jl_any_type,
-                            jl_simplevector_type,
                             jl_array_any_type,
-                            jl_any_type/*jl_code_instance_type*/,
-                            jl_bool_type,
-                            jl_bool_type,
-                            jl_bool_type),
+                            jl_any_type,/*jl_code_instance_type*/
+                            jl_any_type,/*jl_method_specialization_type*/
+                            jl_svecref(tv, 0)),
                         jl_emptysvec,
-                        0, 1, 3);
+                        0, 1, 2);
+    jl_method_specialization_type =
+        (jl_unionall_t*)jl_meth_spec_type->name->wrapper;
     // These fields should be constant, but Serialization wants to mutate them in initialization
-    //const static uint32_t method_instance_constfields[1] = { 0x00000007 }; // (1<<0)|(1<<1)|(1<<2);
-    const static uint32_t method_instance_atomicfields[1] = { 0x0000090 }; // (1<<4)|(1<<7);
-    //Fields 4 and 5 must be protected by method->write_lock, and thus all operations on jl_method_instance_t are threadsafe. TODO: except inInference
+    //const static uint32_t method_instance_constfields[1] = { 0x00000007 }; // (1<<0)|(1<<1);
+    const static uint32_t method_instance_atomicfields[1] = { 0x0000018 }; // (1<<3)|(1<<4)
+    //Fields 3 and 4 must be protected by method->write_lock, and thus all operations on jl_method_instance_t are threadsafe. TODO: except inInference
     //jl_method_instance_type->name->constfields = method_instance_constfields;
-    jl_method_instance_type->name->atomicfields = method_instance_atomicfields;
+    jl_meth_spec_type->name->atomicfields = method_instance_atomicfields;
 
     jl_code_instance_type =
         jl_new_datatype(jl_symbol("CodeInstance"), core,
                         jl_any_type, jl_emptysvec,
-                        jl_perm_symsvec(18,
+                        jl_perm_symsvec(17,
                             "def",
-                            "owner",
                             "next",
                             "min_world",
                             "max_world",
@@ -3333,9 +3355,8 @@ void jl_init_types(void) JL_GC_DISABLED
                             "analysis_results",
                             "specsigflags", "precompile", "relocatability",
                             "invoke", "specptr"), // function object decls
-                        jl_svec(18,
-                            jl_method_instance_type,
-                            jl_any_type,
+                        jl_svec(17,
+                            jl_method_specialization_type,
                             jl_any_type,
                             jl_ulong_type,
                             jl_ulong_type,
@@ -3353,9 +3374,9 @@ void jl_init_types(void) JL_GC_DISABLED
                             jl_any_type, jl_any_type), // fptrs
                         jl_emptysvec,
                         0, 1, 1);
-    jl_svecset(jl_code_instance_type->types, 2, jl_code_instance_type);
-    const static uint32_t code_instance_constfields[1]  = { 0b000001010011100011 }; // Set fields 1, 2, 6-8, 11, 13 as const
-    const static uint32_t code_instance_atomicfields[1] = { 0b110110101100011100 }; // Set fields 3-5, 9, 10, 12, 14-15, 17-18 as atomic
+    jl_svecset(jl_code_instance_type->types, 1, jl_code_instance_type);
+    const static uint32_t code_instance_constfields[1]  = { 0b00000101001110001 }; // Set fields 1, 2, 6-8, 11, 13 as const
+    const static uint32_t code_instance_atomicfields[1] = { 0b11011010110001110 }; // Set fields 3-5, 9, 10, 12, 14-15, 17-18 as atomic
     //Fields 4-5 are only operated on by construction and deserialization, so are const at runtime
     //Fields 13 and 17 must be protected by locks, and thus all operations on jl_code_instance_t are threadsafe
     //Except for field 9 (inferred), which is volatile unless you know which other places are currently using it
@@ -3472,7 +3493,7 @@ void jl_init_types(void) JL_GC_DISABLED
 
     jl_partial_opaque_type = jl_new_datatype(jl_symbol("PartialOpaque"), core, jl_any_type, jl_emptysvec,
         jl_perm_symsvec(4, "typ", "env", "parent", "source"),
-        jl_svec(4, jl_type_type, jl_any_type, jl_method_instance_type, jl_any_type),
+        jl_svec(4, jl_type_type, jl_any_type, jl_method_specialization_type, jl_any_type),
         jl_emptysvec, 0, 0, 4);
 
     // complete builtin type metadata
@@ -3496,11 +3517,14 @@ void jl_init_types(void) JL_GC_DISABLED
     jl_svecset(jl_methtable_type->types, 8, jl_long_type); // uint32_t plus alignment
     jl_svecset(jl_methtable_type->types, 9, jl_uint8_type);
     jl_svecset(jl_methtable_type->types, 10, jl_uint8_type);
-    jl_svecset(jl_method_type->types, 13, jl_method_instance_type);
     //jl_svecset(jl_debuginfo_type->types, 0, jl_method_instance_type); // union(jl_method_instance_type, jl_method_type, jl_symbol_type)
-    jl_svecset(jl_method_instance_type->types, 4, jl_code_instance_type);
+    jl_svecset(jl_meth_spec_type->types, 0,
+        jl_new_struct(jl_uniontype_type, jl_method_specialization_type,
+            jl_new_struct(jl_uniontype_type, jl_method_type, jl_module_type)));
+    jl_svecset(jl_meth_spec_type->types, 3, jl_code_instance_type);
+    jl_svecset(jl_meth_spec_type->types, 4, jl_method_specialization_type);
+    jl_svecset(jl_code_instance_type->types, 15, jl_voidpointer_type);
     jl_svecset(jl_code_instance_type->types, 16, jl_voidpointer_type);
-    jl_svecset(jl_code_instance_type->types, 17, jl_voidpointer_type);
     jl_svecset(jl_binding_type->types, 1, jl_globalref_type);
     jl_svecset(jl_binding_type->types, 2, jl_binding_type);
 
@@ -3509,10 +3533,7 @@ void jl_init_types(void) JL_GC_DISABLED
     jl_compute_field_offsets(jl_uniontype_type);
     jl_compute_field_offsets(jl_tvar_type);
     jl_compute_field_offsets(jl_methtable_type);
-    jl_compute_field_offsets(jl_method_instance_type);
-    jl_compute_field_offsets(jl_code_instance_type);
     jl_compute_field_offsets(jl_unionall_type);
-    jl_compute_field_offsets(jl_simplevector_type);
     jl_compute_field_offsets(jl_symbol_type);
 
     // override ismutationfree for builtin types that are mutable for identity
@@ -3522,6 +3543,16 @@ void jl_init_types(void) JL_GC_DISABLED
     jl_datatype_type->ismutationfree = 1;
     assert(((jl_datatype_t*)jl_array_any_type)->ismutationfree == 0);
     assert(((jl_datatype_t*)jl_array_uint8_type)->ismutationfree == 0);
+
+    jl_method_instance_type = (jl_datatype_t*)jl_apply_type1((jl_value_t*)jl_method_specialization_type, (jl_value_t*)jl_default_spec_type);
+    jl_svecset(jl_method_type->types, 13, jl_method_instance_type);
+
+    jl_method_uninferred_spec_type = (jl_datatype_t*)jl_apply_type1((jl_value_t*)jl_method_specialization_type, (jl_value_t*)uninferred_spec_type);
+
+    jl_compute_field_offsets(jl_simplevector_type);
+    jl_compute_field_offsets(jl_default_spec_type);
+    jl_compute_field_offsets(jl_method_instance_type);
+    jl_compute_field_offsets(jl_code_instance_type);
 
     // Technically not ismutationfree, but there's a separate system to deal
     // with mutations for global state.
