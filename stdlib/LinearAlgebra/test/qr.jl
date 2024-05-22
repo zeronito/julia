@@ -214,6 +214,15 @@ rectangularQ(Q::LinearAlgebra.AbstractQ) = Matrix(Q)
                 @test_throws DimensionMismatch mul!(Vector{eltya}(undef, n+1), q, b)
             end
         end
+
+        @testset "Test nullspace (issue #54354)" begin
+            a15null = nullspace(qr(areal[:,1:n1], ColumnNorm()))
+            @test rank([areal[:,1:n1] a15null]) == 10
+            @test norm(areal[:,1:n1]'a15null,Inf) ≈ zero(eltya) atol=300ε
+            @test norm(a15null'areal[:,1:n1],Inf) ≈ zero(eltya) atol=400ε
+            @test size(nullspace(qr(a', ColumnNorm())), 2) == 0
+            @test nullspace(qr(zeros(eltya,n, n), ColumnNorm())) == Matrix(I, n, n)
+        end
     end
 end
 
@@ -538,6 +547,26 @@ end
 
     @test rank(qr([1.0 2.0; 2.0 4.0], ColumnNorm())) == 1
     @test rank(qr([1.0 2.0 3.0; 4.0 5.0 6.0 ; 7.0 8.0 9.0], ColumnNorm())) == 2
+end
+
+@testset "Test matrix condition number (issue #54354)" begin
+    ainit = rand(n, n)
+    @testset "for $elty" for elty in (Float32, Float64, ComplexF32, ComplexF64)
+        ainit = convert(Matrix{elty}, ainit)
+        for a in (copy(ainit), view(ainit, 1:n, 1:n))
+            F = qr(a, ColumnNorm())
+            Rinv = inv(F.R)
+            @test cond(F, 1)   == opnorm(F.R, 1) * opnorm(Rinv, 1)
+            @test cond(F, Inf) == opnorm(F.R, Inf) * opnorm(Rinv, Inf)
+            @test_throws ArgumentError cond(F,3)
+        end
+    end
+    @testset "Singular matrices" for p in (1, 2, Inf)
+        @test cond(qr(zeros(Int, 2, 2), ColumnNorm()), p) == Inf
+        @test cond(qr(zeros(2, 2), ColumnNorm()), p)      == Inf
+        @test cond(qr([0 0; 1 1], ColumnNorm()), p)       == Inf
+        @test cond(qr([0. 0.; 1. 1.], ColumnNorm()), p)   == Inf
+    end
 end
 
 end # module TestQR
