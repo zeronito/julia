@@ -37,7 +37,7 @@ checksum-curl: $(SRCCACHE)/curl-$(CURL_VER).tar.bz2
 # Disable....almost everything
 CURL_CONFIGURE_FLAGS := $(CONFIGURE_COMMON) \
 	--without-gnutls --without-libidn2 --without-librtmp \
-	--without-nss --without-libpsl --without-libgsasl --without-fish-functions-dir \
+	--without-libpsl --without-libgsasl --without-fish-functions-dir \
 	--disable-ares --disable-manual --disable-ldap --disable-ldaps --disable-static \
 	--without-gssapi --without-brotli
 # A few things we actually enable
@@ -47,13 +47,13 @@ CURL_CONFIGURE_FLAGS += --enable-versioned-symbols \
 # We use different TLS libraries on different platforms.
 #   On Windows, we use schannel
 #   On MacOS, we use SecureTransport
-#   On Linux, we use mbedTLS
+#   On Linux, we use OpenSSL
 ifeq ($(OS), WINNT)
 CURL_TLS_CONFIGURE_FLAGS := --with-schannel
 else ifeq ($(OS), Darwin)
 CURL_TLS_CONFIGURE_FLAGS := --with-secure-transport
 else
-CURL_TLS_CONFIGURE_FLAGS := --with-mbedtls=$(build_prefix)
+CURL_TLS_CONFIGURE_FLAGS := --with-openssl
 endif
 CURL_CONFIGURE_FLAGS += $(CURL_TLS_CONFIGURE_FLAGS)
 

@@ -1,6 +1,6 @@
 # -*- makefile -*-
 ## jll artifact
-CURL_JLL_NAME := LibCURL
+OPENSSL_JLL_NAME := OpenSSL
 
 ## source build
-CURL_VER := 8.7.1
+OPENSSL_VER := 3.0.13
