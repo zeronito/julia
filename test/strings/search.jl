@@ -165,6 +165,16 @@ end
     @test isnothing(findprev(==('\xa6'), "æa", 2))
 end
 
+# See the comments in #54579
+@testset "Search for invalid chars" begin
+    @test findfirst(==('\xff'), "abc\xffde") == 4
+    @test findprev(isequal('\xa6'), "abc\xa69", 5) == 4
+    @test isnothing(findfirst(==('\xff'), "abcdeæd"))
+
+    @test isnothing(findnext(==('\xa6'), "æ", 1))
+    @test isnothing(findprev(==('\xa6'), "æa", 2))
+end
+
 # string forward search with a single-char string
 @test findfirst("x", astr) === nothing
 @test findfirst("H", astr) == 1:1
