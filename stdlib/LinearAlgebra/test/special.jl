@@ -772,4 +772,26 @@ end
     end
 end
 
+# issue #53014
+@testset "Zero Forwarding To Parents Of Wrapped Arrays" begin
+    struct WrappedArray{T,N} <: AbstractArray{T,N}
+        A::Array{T,N}
+    end
+
+    Base.zero(A::WrappedArray) = WrappedArray(zero(A.A))
+    Base.size(A::WrappedArray) = size(A.A)
+
+    matTypes = (Symmetric, Hermitian, Adjoint, LowerTriangular, Transpose, UpperHessenberg, UpperTriangular)
+    for MatType in matTypes
+        for ArrayType in (WrappedArray, Array)
+            array = ArrayType([1 2; 2 3])
+            mat = MatType(array)
+            if isdefined(mat, :uplo)
+                @test zero(mat).uplo == mat.uplo
+            end
+            @test typeof(zero(mat)) == typeof(mat)
+        end
+    end
+end
+
 end # module TestSpecial
