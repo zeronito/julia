@@ -169,6 +169,19 @@ end
     end
 end
 
+@inline function getindex(A::Bidiagonal{T}, b::BandIndex) where T
+    @boundscheck checkbounds(A, _cartinds(b))
+    if b.band == 0
+        return @inbounds A.dv[b.index]
+    elseif A.uplo == 'U' && b.band == 1
+        return @inbounds A.ev[b.index]
+    elseif A.uplo == 'L' && b.band == -1
+        return @inbounds A.ev[b.index]
+    else
+        return bidiagzero(A, Tuple(_cartinds(b))...)
+    end
+end
+
 @inline function setindex!(A::Bidiagonal, x, i::Integer, j::Integer)
     @boundscheck checkbounds(A, i, j)
     if i == j
@@ -183,6 +196,9 @@ end
     end
     return x
 end
+
+Base._reverse(A::Bidiagonal, dims) = reverse!(Matrix(A); dims)
+Base._reverse(A::Bidiagonal, ::Colon) = Bidiagonal(reverse(A.dv), reverse(A.ev), A.uplo == 'U' ? :L : :U)
 
 ## structured matrix methods ##
 function Base.replace_in_print_matrix(A::Bidiagonal,i::Integer,j::Integer,s::AbstractString)
