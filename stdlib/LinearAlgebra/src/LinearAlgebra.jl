@@ -190,6 +190,7 @@ end
 abstract type Algorithm end
 struct DivideAndConquer <: Algorithm end
 struct QRIteration <: Algorithm end
+struct RobustRepresentations <: Algorithm end
 
 # Pivoting strategies for matrix factorization algorithms.
 abstract type PivotingStrategy end
@@ -240,6 +241,8 @@ Note that the [element type](@ref eltype) of the matrix must admit [`norm`](@ref
 [`abs`](@ref) methods, whose respective result types must admit a [`<`](@ref) method.
 """
 struct ColumnNorm <: PivotingStrategy end
+
+using Base: DimOrInd
 
 # Check that stride of matrix/vector is 1
 # Writing like this to avoid splatting penalty when called with multiple arguments,
@@ -496,6 +499,33 @@ See also: `copymutable_oftype`.
 """
 copy_similar(A::AbstractArray, ::Type{T}) where {T} = copyto!(similar(A, T, size(A)), A)
 
+"""
+    BandIndex(band, index)
+
+Represent a Cartesian index as a linear index along a band.
+This type is primarily meant to index into a specific band without branches,
+so, for best performance, `band` should be a compile-time constant.
+"""
+struct BandIndex
+    band :: Int
+    index :: Int
+end
+function _cartinds(b::BandIndex)
+    (; band, index) = b
+    bandg0 = max(band,0)
+    row = index - band + bandg0
+    col = index + bandg0
+    CartesianIndex(row, col)
+end
+function Base.to_indices(A, inds, t::Tuple{BandIndex, Vararg{Any}})
+    to_indices(A, inds, (_cartinds(first(t)), Base.tail(t)...))
+end
+function Base.checkbounds(::Type{Bool}, A::AbstractMatrix, b::BandIndex)
+    checkbounds(Bool, A, _cartinds(b))
+end
+function Base.checkbounds(A::Broadcasted, b::BandIndex)
+    checkbounds(A, _cartinds(b))
+end
 
 include("adjtrans.jl")
 include("transpose.jl")
@@ -572,6 +602,10 @@ wrapper_char(::Transpose) = 'T'
 wrapper_char(A::Hermitian) =  WrapperChar('H', A.uplo == 'U')
 wrapper_char(A::Hermitian{<:Real}) = WrapperChar('S', A.uplo == 'U')
 wrapper_char(A::Symmetric) = WrapperChar('S', A.uplo == 'U')
+
+wrapper_char_NTC(A::AbstractArray) = uppercase(wrapper_char(A)) == 'N'
+wrapper_char_NTC(A::Union{StridedArray, Adjoint, Transpose}) = true
+wrapper_char_NTC(A::Union{Symmetric, Hermitian}) = false
 
 Base.@constprop :aggressive function wrap(A::AbstractVecOrMat, tA::AbstractChar)
     # merge the result of this before return, so that we can type-assert the return such
@@ -740,7 +774,7 @@ function peakflops(n::Integer=4096; eltype::DataType=Float64, ntrials::Integer=3
     end
 
     if parallel
-        let Distributed = Base.require_stdlib(Base.PkgId(
+        let Distributed = Base.require(Base.PkgId(
                 Base.UUID((0x8ba89e20_285c_5b6f, 0x9357_94700520ee1b)), "Distributed"))
             nworkers = @invokelatest Distributed.nworkers()
             results = @invokelatest Distributed.pmap(peakflops, fill(n, nworkers))
