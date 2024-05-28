@@ -1,4 +1,4 @@
-# This file is a part of Julia. License is MIT: https://julialang.org/license
+z# This file is a part of Julia. License is MIT: https://julialang.org/license
 
 module Sort
 
@@ -1572,7 +1572,7 @@ const DEFAULT_UNSTABLE = DEFAULT_STABLE
 """
     SMALL_THRESHOLD
     
-    SMALL_THRESHOLD is constant for internaly decide, whatever is arrey considered small or big
+    SMALL_THRESHOLD is constant for internally decide, whatever is arrey considered small or big
     
 """
 const SMALL_THRESHOLD  = 20
