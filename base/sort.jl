@@ -1572,8 +1572,7 @@ const DEFAULT_UNSTABLE = DEFAULT_STABLE
 """
     SMALL_THRESHOLD
     
-    SMALL_THRESHOLD is constant for internally decide, whatever is arrey considered small or big
-    
+SMALL_THRESHOLD is a constant that is used internally to decide what is considered to be small or large.    
 """
 const SMALL_THRESHOLD  = 20
 
