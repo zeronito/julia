@@ -1569,6 +1569,7 @@ The algorithms used by `DEFAULT_UNSTABLE` are an implementation detail. They are
 the same as those used by [`DEFAULT_STABLE`](@ref), but this is subject to change in future.
 """
 const DEFAULT_UNSTABLE = DEFAULT_STABLE
+
 """
     SMALL_THRESHOLD
     
