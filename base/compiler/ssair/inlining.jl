@@ -1587,8 +1587,11 @@ function handle_finalizer_call!(ir::IRCode, idx::Int, stmt::Expr, info::Finalize
         # `Core.Compiler` data structure into the global cache
         item1 = cases[1].item
         if isa(item1, InliningTodo)
-            push!(stmt.args, true)
-            push!(stmt.args, item1.mi)
+            code = get(code_cache(state), item1.mi, nothing) # COMBAK: this seems like a bad design, can we use stmt_info instead to store the correct info?
+            if code isa CodeInstance
+                push!(stmt.args, true)
+                push!(stmt.args, code)
+            end
         elseif isa(item1, InvokeCase)
             push!(stmt.args, false)
             push!(stmt.args, item1.invoke)
