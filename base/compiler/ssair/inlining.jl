@@ -35,7 +35,7 @@ struct SomeCase
 end
 
 struct InvokeCase
-    invoke::MethodInstance
+    invoke::CodeInstance
     effects::Effects
     info::CallInfo
 end
@@ -59,13 +59,14 @@ struct UnionSplit
 end
 
 struct InliningEdgeTracker
-    edges::Vector{Any}
+    state::InliningState
     invokesig::Union{Nothing,Vector{Any}}
     InliningEdgeTracker(state::InliningState, invokesig::Union{Nothing,Vector{Any}}=nothing) =
-        new(state.edges, invokesig)
+        new(state, invokesig)
 end
 
-function add_inlining_backedge!((; edges, invokesig)::InliningEdgeTracker, mi::MethodInstance)
+function add_inlining_backedge!((; state, invokesig)::InliningEdgeTracker, mi::MethodInstance)
+    (; edges) = state
     if invokesig === nothing
         push!(edges, mi)
     else # invoke backedge
@@ -794,9 +795,13 @@ function compileable_specialization(mi::MethodInstance, effects::Effects,
             return nothing
         end
     end
-    add_inlining_backedge!(et, mi) # to the dispatch lookup
-    mi_invoke !== mi && push!(et.edges, method.sig, mi_invoke) # add_inlining_backedge to the invoke call, if that is different
-    return InvokeCase(mi_invoke, effects, info)
+    code = get(code_cache(et.state), mi_invoke, nothing)
+    if code isa CodeInstance
+        add_inlining_backedge!(et, mi) # to the dispatch lookup
+        mi_invoke !== mi && push!(et.state.edges, method.sig, mi_invoke) # add_inlining_backedge to the invoke call, if that is different
+        return InvokeCase(code, effects, info)
+    end
+    return nothing
 end
 
 function compileable_specialization(match::MethodMatch, effects::Effects,
@@ -1597,7 +1602,10 @@ end
 
 function handle_invoke_expr!(todo::Vector{Pair{Int,Any}}, ir::IRCode,
     idx::Int, stmt::Expr, @nospecialize(info::CallInfo), flag::UInt32, sig::Signature, state::InliningState)
-    mi = stmt.args[1]::MethodInstance
+    mi = stmt.args[1]
+    if !(mi isa MethodInstance)
+        mi = (mi::CodeInstance).def
+    end
     case = resolve_todo(mi, info, flag, state)
     handle_single_case!(todo, ir, idx, stmt, case, false)
     return nothing
