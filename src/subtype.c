@@ -311,6 +311,17 @@ static void clean_occurs(jl_stenv_t *e)
     }
 }
 
+static void restore_occurs(jl_stenv_t *e, jl_savedenv_t *se)
+{
+    size_t k = 0;
+    jl_varbinding_t *var = e->vars;
+    while (var != NULL) {
+        var->occurs |= se->buf[k];
+        k += 4;
+        var = var->prev;
+    }
+}
+
 #define flip_offset(e) ((e)->Loffset *= -1)
 
 // type utilities
@@ -598,6 +609,8 @@ static jl_value_t *simple_meet(jl_value_t *a, jl_value_t *b, int overesi)
 // main subtyping algorithm
 
 static int subtype(jl_value_t *x, jl_value_t *y, jl_stenv_t *e, int param);
+
+#define has_next_union_state(e, R) ((((R) ? &(e)->Runions : &(e)->Lunions)->more) != 0)
 
 static int next_union_state(jl_stenv_t *e, int8_t R) JL_NOTSAFEPOINT
 {
@@ -4193,9 +4206,11 @@ static jl_value_t *intersect_all(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
     is[0] = intersect(x, y, e, 0); // root
     if (is[0] != jl_bottom_type) {
         expand_local_env(e, is[0]);
-        niter = merge_env(e, &me, niter);
+        if (!e->emptiness_only && has_next_union_state(e, 1))
+            niter = merge_env(e, &me, niter);
     }
-    restore_env(e, &se, 1);
+    if (!e->emptiness_only && has_next_union_state(e, 1))
+        restore_env(e, &se, 1);
     while (next_union_state(e, 1)) {
         if (e->emptiness_only && is[0] != jl_bottom_type)
             break;
@@ -4206,9 +4221,11 @@ static jl_value_t *intersect_all(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
         is[1] = intersect(x, y, e, 0);
         if (is[1] != jl_bottom_type) {
             expand_local_env(e, is[1]);
-            niter = merge_env(e, &me, niter);
+            if (niter > 0 || (!e->emptiness_only && has_next_union_state(e, 1)))
+                niter = merge_env(e, &me, niter);
         }
-        restore_env(e, &se, 1);
+        if (!e->emptiness_only && has_next_union_state(e, 1))
+            restore_env(e, &se, 1);
         if (is[0] == jl_bottom_type)
             is[0] = is[1];
         else if (is[1] != jl_bottom_type) {
@@ -4225,6 +4242,11 @@ static jl_value_t *intersect_all(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
         final_merge_env(e, &me, &se);
         restore_env(e, &me, 1);
         free_env(&me);
+    }
+    else {
+        if (is[0] == jl_bottom_type)
+            clean_occurs(e);
+        restore_occurs(e, &se);
     }
     free_env(&se);
     JL_GC_POP();
