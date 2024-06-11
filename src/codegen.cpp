@@ -1975,6 +1975,7 @@ public:
     int nargs = 0;
     int nvargs = -1;
     bool is_opaque_closure = false;
+    bool is_toplevel = false;
 
     Value *pgcstack = NULL;
     Instruction *topalloca = NULL;
@@ -3215,7 +3216,7 @@ static jl_cgval_t emit_globalop(jl_codectx_t &ctx, jl_module_t *mod, jl_sym_t *s
     Value *bp = global_binding_pointer(ctx, mod, sym, &bnd, true, alloc);
     if (bp == NULL)
         return jl_cgval_t();
-    if (bnd && !bnd->constp) {
+    if (bnd && !bnd->constp && !ctx.is_toplevel) {
         jl_value_t *ty = jl_atomic_load_relaxed(&bnd->ty);
         if (ty != nullptr) {
             const std::string fname = issetglobal ? "setglobal!" : isreplaceglobal ? "replaceglobal!" : isswapglobal ? "swapglobal!" : ismodifyglobal ? "modifyglobal!" : "setglobalonce!";
@@ -3227,7 +3228,7 @@ static jl_cgval_t emit_globalop(jl_codectx_t &ctx, jl_module_t *mod, jl_sym_t *s
                     return jl_cgval_t();
             }
             bool isboxed = true;
-            bool maybe_null = jl_atomic_load_relaxed(&bnd->value) == NULL;
+            bool maybe_null = (!bnd->isdefined && !bnd->constp) || (jl_atomic_load_relaxed(&bnd->value) == NULL);
             return typed_store(ctx,
                                julia_binding_pvalue(ctx, bp),
                                rval, cmp, ty,
@@ -5622,7 +5623,7 @@ static jl_cgval_t emit_isdefined(jl_codectx_t &ctx, jl_value_t *sym)
         }
         jl_binding_t *bnd = jl_get_binding(modu, name);
         if (bnd) {
-            if (jl_atomic_load_acquire(&bnd->value) != NULL && bnd->constp)
+            if (jl_atomic_load_acquire(&bnd->value) != NULL && (bnd->constp || bnd->isdefined))
                 return mark_julia_const(ctx, jl_true);
             Value *bp = julia_binding_gv(ctx, bnd);
             bp = julia_binding_pvalue(ctx, bp);
@@ -8116,7 +8117,6 @@ static jl_llvm_functions_t
     ctx.source = src;
 
     std::map<int, BasicBlock*> labels;
-    bool toplevel = false;
     ctx.module = jl_is_method(lam->def.method) ? lam->def.method->module : lam->def.module;
     ctx.linfo = lam;
     ctx.name = TSM.getModuleUnlocked()->getModuleIdentifier().data();
@@ -8136,7 +8136,7 @@ static jl_llvm_functions_t
         if (vn != jl_unused_sym)
             ctx.vaSlot = ctx.nargs - 1;
     }
-    toplevel = !jl_is_method(lam->def.method);
+    ctx.is_toplevel = !jl_is_method(lam->def.method);
     ctx.rettype = jlrettype;
     ctx.funcName = ctx.name;
     ctx.spvals_ptr = NULL;
@@ -8495,7 +8495,7 @@ static jl_llvm_functions_t
     allocate_gc_frame(ctx, b0);
     Value *last_age = NULL;
     Value *world_age_field = get_last_age_field(ctx);
-    if (toplevel || ctx.is_opaque_closure) {
+    if (ctx.is_toplevel || ctx.is_opaque_closure) {
         jl_aliasinfo_t ai = jl_aliasinfo_t::fromTBAA(ctx, ctx.tbaa().tbaa_gcframe);
         last_age = ai.decorateInst(ctx.builder.CreateAlignedLoad(
             ctx.types().T_size, world_age_field, ctx.types().alignof_ptr));
@@ -9011,7 +9011,7 @@ static jl_llvm_functions_t
     Instruction &prologue_end = ctx.builder.GetInsertBlock()->back();
 
     // step 11a. For top-level code, load the world age
-    if (toplevel && !ctx.is_opaque_closure) {
+    if (ctx.is_toplevel && !ctx.is_opaque_closure) {
         LoadInst *world = ctx.builder.CreateAlignedLoad(ctx.types().T_size,
             prepare_global_in(jl_Module, jlgetworld_global), ctx.types().alignof_ptr);
         world->setOrdering(AtomicOrdering::Acquire);
@@ -9313,7 +9313,7 @@ static jl_llvm_functions_t
             }
 
             mallocVisitStmt(sync_bytes, have_dbg_update);
-            if (toplevel || ctx.is_opaque_closure)
+            if (ctx.is_toplevel || ctx.is_opaque_closure)
                 ctx.builder.CreateStore(last_age, world_age_field);
             assert(type_is_ghost(retty) || returninfo.cc == jl_returninfo_t::SRet ||
                 retval->getType() == ctx.f->getReturnType());
@@ -9663,7 +9663,7 @@ static jl_llvm_functions_t
                         I.setDebugLoc(topdebugloc);
                     }
                 }
-                if (toplevel && !ctx.is_opaque_closure && !in_prologue) {
+                if (ctx.is_toplevel && !ctx.is_opaque_closure && !in_prologue) {
                     // we're at toplevel; insert an atomic barrier between every instruction
                     // TODO: inference is invalid if this has any effect (which it often does)
                     LoadInst *world = new LoadInst(ctx.types().T_size,
