@@ -2166,6 +2166,7 @@ function perform_symbolic_evaluation!(key, stmt::PhiNode, ssa_to_ssa, blockidx, 
 
     firstval = nothing
     allthesame = true # If all values into the phi node are the same SSAValue
+    has_backedge = false
 
     ordered_indices = collect(1:no_of_edges)
     sort!(ordered_indices; by=i->stmt.edges[i])
@@ -2179,6 +2180,7 @@ function perform_symbolic_evaluation!(key, stmt::PhiNode, ssa_to_ssa, blockidx, 
             continue
         end
 
+        has_backedge |= blockidx <= edge
         push!(key, edge)
 
         if val isa SSAValue
@@ -2193,11 +2195,22 @@ function perform_symbolic_evaluation!(key, stmt::PhiNode, ssa_to_ssa, blockidx, 
             allthesame = false
         end
     end
-    if allthesame && firstval !== nothing &&
-            dominates(get!(lazydomtree), block_for_inst(ir, firstval.id), blockidx)
-        return firstval
+    if allthesame
+        if firstval === nothing
+            return svec()
+        end
+        # If we allow firstval to not be a SSAValue, we can return it now if it isn't a SSAValue
+
+        # Copy of https://github.com/llvm/llvm-project/blob/3a2f7d8a9f84db380af5122418098cb28a57443f/llvm/lib/Transforms/Scalar/NewGVN.cpp#L1796-L1804
+        has_undef = length(ir.cfg.blocks[blockidx].preds) != no_of_edges # undef in llvm sense
+
+        # TODO: Calculate cycle_freeness.
+        cycle_free = !has_backedge # Assume a backedge means there is a cycle. This is a conservative assumption.
+
+        if !(has_undef && has_backedge && !cycle_free) && dominates(get!(lazydomtree), block_for_inst(ir, firstval.id), blockidx)
+            return firstval
+        end
     end
-    length(key) == 1 && return svec()
     # returns (sorted edges, ssa_to_ssa[ssa values of sorted edges], block index)
     # faster to splat a single vector into a svec than multiple,
     # which is why the code above is so complex
@@ -2295,6 +2308,12 @@ function gvn!(ir::IRCode)
 
     if congruence_classes === nothing
         return ir
+    end
+
+    for (ssa_leader, class) in congruence_classes, element in class
+        @assert ssa_leader.id < 10000000000
+        @assert element.ssa < 10000000000
+        @assert element.blockidx < 10000000000
     end
 
     domtree = get!(lazydomtree)
