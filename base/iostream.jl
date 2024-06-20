@@ -47,10 +47,23 @@ macro _lock_ios(s, expr)
 end
 
 """
-    fd(stream)
+    fd(x)
 
-Return the file descriptor backing the stream or file. Note that this function only applies
-to synchronous `File`'s and `IOStream`'s not to any of the asynchronous streams.
+Return the file descriptor backing an [`IOStream`](@ref), `File`, or socket.
+
+!!! compat "Julia 1.12"
+    Getting the file descriptor of sockets are supported as of Julia 1.12.
+
+!!! warning
+    Duplicate the returned file descriptor with [`Libc.dup()`](@ref) before
+    passing it to another system that will take ownership of it (e.g. a C
+    library). Otherwise both the Julia object `x` and the other system may try
+    to close the file descriptor, which will cause errors.
+
+!!! warning
+    The file descriptors for sockets are asynchronous (i.e. `O_NONBLOCK` on
+    POSIX and `OVERLAPPED` on Windows), they may behave differently than regular
+    file descriptors.
 """
 fd(s::IOStream) = Int(ccall(:jl_ios_fd, Clong, (Ptr{Cvoid},), s.ios))
 
