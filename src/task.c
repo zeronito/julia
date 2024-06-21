@@ -263,7 +263,7 @@ JL_NO_ASAN static void restore_stack2(jl_task_t *t, jl_ptls_t ptls, jl_task_t *l
         return;
     if (r != 0 || returns != 1)
         abort();
-#elif defined(JL_HAVE_ASM) || defined(JL_TASK_SWITCH_WINDOWS)
+#elif defined(JL_TASK_SWITCH_ASM) || defined(JL_TASK_SWITCH_WINDOWS)
     if (jl_setjmp(lastt->ctx.copy_ctx.uc_mcontext, 0))
         return;
 #else
@@ -1277,7 +1277,7 @@ static void jl_set_fiber(jl_ucontext_t *t)
 }
 #endif
 
-#if defined(JL_TASK_SWITCH_LIBUNWIND) || defined(JL_HAVE_ASM)
+#if defined(JL_TASK_SWITCH_LIBUNWIND) || defined(JL_TASK_SWITCH_ASM)
 static char *jl_alloc_fiber(_jl_ucontext_t *t, size_t *ssize, jl_task_t *owner)
 {
     char *stkbuf = (char*)jl_malloc_stack(ssize, owner);
@@ -1318,7 +1318,7 @@ static void jl_set_fiber(jl_ucontext_t *t)
         abort();
     unw_resume(&c);
 }
-#elif defined(JL_HAVE_ASM)
+#elif defined(JL_TASK_SWITCH_ASM)
 static void jl_swap_fiber(jl_ucontext_t *lastt, jl_ucontext_t *t)
 {
     if (jl_setjmp(lastt->ctx.uc_mcontext, 0))
@@ -1332,7 +1332,7 @@ static void jl_set_fiber(jl_ucontext_t *t)
 }
 #endif
 
-#if defined(JL_TASK_SWITCH_LIBUNWIND) && !defined(JL_HAVE_ASM)
+#if defined(JL_TASK_SWITCH_LIBUNWIND) && !defined(JL_TASK_SWITCH_ASM)
 #if defined(_CPU_X86_) || defined(_CPU_X86_64_)
 #define PUSH_RET(ctx, stk) \
     do { \
@@ -1396,7 +1396,7 @@ static void jl_start_fiber_swap(jl_ucontext_t *lastt, jl_ucontext_t *t)
 }
 #endif
 
-#if defined(JL_HAVE_ASM)
+#if defined(JL_TASK_SWITCH_ASM)
 JL_NO_ASAN static void jl_start_fiber_swap(jl_ucontext_t *lastt, jl_ucontext_t *t)
 {
     assert(lastt);
@@ -1480,7 +1480,7 @@ JL_NO_ASAN static void jl_start_fiber_set(jl_ucontext_t *t)
         " trap; \n"
         : : "r"(stk), "r"(fn) : "memory");
 #else
-#error JL_HAVE_ASM defined but not implemented for this CPU type
+#error JL_TASK_SWITCH_ASM defined but not implemented for this CPU type
 #endif
     __builtin_unreachable();
 }

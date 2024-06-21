@@ -979,7 +979,7 @@ static void jl_rec_backtrace(jl_task_t *t) JL_NOTSAFEPOINT
         context = &c;
 #elif defined(JL_TASK_SWITCH_LIBUNWIND)
         context = &t->ctx.ctx;
-#elif defined(JL_HAVE_ASM)
+#elif defined(JL_TASK_SWITCH_ASM)
         memset(&c, 0, sizeof(c));
      #if defined(_OS_LINUX_) && defined(__GLIBC__)
         __jmp_buf *mctx = &t->ctx.ctx.uc_mcontext->__jmpbuf;
