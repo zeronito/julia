@@ -977,7 +977,7 @@ static void jl_rec_backtrace(jl_task_t *t) JL_NOTSAFEPOINT
         #error Windows is currently only supported on x86 and x86_64
 #endif
         context = &c;
-#elif defined(JL_HAVE_UNW_CONTEXT)
+#elif defined(JL_TASK_SWITCH_LIBUNWIND)
         context = &t->ctx.ctx;
 #elif defined(JL_HAVE_ASM)
         memset(&c, 0, sizeof(c));

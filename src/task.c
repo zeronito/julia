@@ -256,7 +256,7 @@ JL_NO_ASAN static void restore_stack2(jl_task_t *t, jl_ptls_t ptls, jl_task_t *l
     void *_y = t->stkbuf;
     assert(_x != NULL && _y != NULL);
     memcpy_stack_a16((uint64_t*)_x, (uint64_t*)_y, nb); // destroys all but the current stackframe
-#if defined(JL_HAVE_UNW_CONTEXT)
+#if defined(JL_TASK_SWITCH_LIBUNWIND)
     volatile int returns = 0;
     int r = unw_getcontext(&lastt->ctx.ctx);
     if (++returns == 2) // r is garbage after the first return
@@ -1277,7 +1277,7 @@ static void jl_set_fiber(jl_ucontext_t *t)
 }
 #endif
 
-#if defined(JL_HAVE_UNW_CONTEXT) || defined(JL_HAVE_ASM)
+#if defined(JL_TASK_SWITCH_LIBUNWIND) || defined(JL_HAVE_ASM)
 static char *jl_alloc_fiber(_jl_ucontext_t *t, size_t *ssize, jl_task_t *owner)
 {
     char *stkbuf = (char*)jl_malloc_stack(ssize, owner);
@@ -1291,7 +1291,7 @@ static char *jl_alloc_fiber(_jl_ucontext_t *t, size_t *ssize, jl_task_t *owner)
 }
 #endif
 
-#if defined(JL_HAVE_UNW_CONTEXT)
+#if defined(JL_TASK_SWITCH_LIBUNWIND)
 static inline void jl_unw_swapcontext(unw_context_t *old, unw_cursor_t *c)
 {
     volatile int returns = 0;
@@ -1332,7 +1332,7 @@ static void jl_set_fiber(jl_ucontext_t *t)
 }
 #endif
 
-#if defined(JL_HAVE_UNW_CONTEXT) && !defined(JL_HAVE_ASM)
+#if defined(JL_TASK_SWITCH_LIBUNWIND) && !defined(JL_HAVE_ASM)
 #if defined(_CPU_X86_) || defined(_CPU_X86_64_)
 #define PUSH_RET(ctx, stk) \
     do { \
@@ -1400,7 +1400,7 @@ static void jl_start_fiber_swap(jl_ucontext_t *lastt, jl_ucontext_t *t)
 JL_NO_ASAN static void jl_start_fiber_swap(jl_ucontext_t *lastt, jl_ucontext_t *t)
 {
     assert(lastt);
-#ifdef JL_HAVE_UNW_CONTEXT
+#ifdef JL_TASK_SWITCH_LIBUNWIND
     volatile int returns = 0;
     int r = unw_getcontext(&lastt->ctx);
     if (++returns == 2) // r is garbage after the first return
