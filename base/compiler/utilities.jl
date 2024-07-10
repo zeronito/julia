@@ -128,6 +128,8 @@ function get_staged(mi::MethodInstance, world::UInt)
 end
 
 # Called from `jl_code_for_interpreter`
+retrieve_code_info(linfo::MethodInstance, world::UInt64) =
+    retrieve_code_info(nothing, linfo, world) # TODO remove
 function retrieve_code_info(compiler::CompilerInstance, linfo::MethodInstance, world::UInt64)
     retrieve_code_info(abstract_interpreter(compiler, world), linfo)
 end
