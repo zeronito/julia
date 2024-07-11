@@ -931,7 +931,8 @@ function workqueue_for(tid::Int)
         if length(qs) < tid
             nt = Threads.maxthreadid()
             @assert tid <= nt
-            global Workqueues = qs = copyto!(typeof(qs)(undef, length(qs) + nt - 1), qs)
+            new_length = length(qs) + nt - 1
+            global Workqueues = qs = copyto!(typeof(qs)(undef, new_length), qs)
         end
         if !isassigned(qs, tid)
             @inbounds qs[tid] = StickyWorkqueue()
@@ -1173,8 +1174,17 @@ end
 
 function wait()
     GC.safepoint()
-    W = workqueue_for(Threads.threadid())
+    tid = Threads.threadid()
+    W = workqueue_for(tid)
+    t = time_ns()
     poptask(W)
+    t = time_ns() - t
+    if isassigned(Workqueue_sched_times)
+        ts = Workqueue_sched_times[]
+        if tid <= length(ts) # TODO: Grow Workqueue_sched_times if needed, but needs to be threadsafe
+            ts[tid] += t
+        end
+    end
     result = try_yieldto(ensure_rescheduled)
     process_events()
     # return when we come out of the queue
