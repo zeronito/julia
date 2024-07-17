@@ -79,7 +79,7 @@ end
 function find_curblock(domtree::DomTree, allblocks::BitSet, curblock::Int)
     # TODO: This can be much faster by looking at current level and only
     # searching for those blocks in a sorted order
-    while !(curblock in allblocks) && curblock !== 0
+    while curblock ∉ allblocks && curblock ≠ 0
         curblock = domtree.idoms_bb[curblock]
     end
     return curblock
@@ -1680,7 +1680,7 @@ end
 function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse}}, used_ssas::Vector{Int}, lazydomtree::LazyDomtree, inlining::Union{Nothing, InliningState})
     𝕃ₒ = inlining === nothing ? SimpleInferenceLattice.instance : optimizer_lattice(inlining.interp)
     lazypostdomtree = LazyPostDomtree(ir)
-    for (idx, (intermediaries, defuse)) in defuses
+    for (defidx, (intermediaries, defuse)) in defuses
         intermediaries = collect(intermediaries)
         # Check if there are any uses we did not account for. If so, the variable
         # escapes and we cannot eliminate the allocation. This works, because we're guaranteed
@@ -1688,16 +1688,15 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
         # show up in the nuses_total count.
         nleaves = length(defuse.uses) + length(defuse.defs)
         nuses = 0
-        for idx in intermediaries
-            nuses += used_ssas[idx]
+        for iidx in intermediaries
+            nuses += used_ssas[iidx]
         end
-        nuses_total = used_ssas[idx] + nuses - length(intermediaries)
+        nuses_total = used_ssas[defidx] + nuses - length(intermediaries)
         nleaves == nuses_total || continue
         # Find the type for this allocation
-        defexpr = ir[SSAValue(idx)][:stmt]
+        defexpr = ir[SSAValue(defidx)][:stmt]
         isexpr(defexpr, :new) || continue
-        newidx = idx
-        typ = unwrap_unionall(ir.stmts[newidx][:type])
+        typ = unwrap_unionall(ir.stmts[defidx][:type])
         # Could still end up here if we tried to setfield! on an immutable, which would
         # error at runtime, but is not illegal to have in the IR.
         typ = widenconst(typ)
@@ -1713,7 +1712,7 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
             end
         end
         if finalizer_idx !== nothing && inlining !== nothing
-            try_resolve_finalizer!(ir, idx, finalizer_idx, defuse, inlining,
+            try_resolve_finalizer!(ir, defidx, finalizer_idx, defuse, inlining,
                 lazydomtree, lazypostdomtree, ir[SSAValue(finalizer_idx)][:info])
             continue
         end
@@ -1752,11 +1751,11 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
         # but we should come up with semantics for well defined semantics
         # for uninitialized fields first.
         ndefuse = length(fielddefuse)
-        blocks = Vector{Tuple{#=phiblocks=# Vector{Int}, #=allblocks=# BitSet}}(undef, ndefuse)
+        blocks = Vector{Tuple{#=phiblocks=#Vector{Int},#=allblocks=#BitSet}}(undef, ndefuse)
         for fidx in 1:ndefuse
             du = fielddefuse[fidx]
             isempty(du.uses) && continue
-            push!(du.defs, newidx)
+            push!(du.defs, defidx)
             ldu = compute_live_ins(ir.cfg, du)
             if isempty(ldu.live_in_bbs)
                 phiblocks = Int[]
@@ -1769,7 +1768,7 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
                 for i = 1:length(du.uses)
                     use = du.uses[i]
                     if use.kind === :isdefined
-                        if has_safe_def(ir, get!(lazydomtree), allblocks, du, newidx, use.idx)
+                        if has_safe_def(ir, get!(lazydomtree), allblocks, du, defidx, use.idx)
                             ir[SSAValue(use.idx)][:stmt] = true
                         else
                             all_eliminated = false
@@ -1782,7 +1781,7 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
                             continue
                         end
                     end
-                    has_safe_def(ir, get!(lazydomtree), allblocks, du, newidx, use.idx) || @goto skip
+                    has_safe_def(ir, get!(lazydomtree), allblocks, du, defidx, use.idx) || @goto skip
                 end
             else # always have some definition at the allocation site
                 for i = 1:length(du.uses)
@@ -1849,19 +1848,19 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
             # all "usages" (i.e. `getfield` and `isdefined` calls) are eliminated,
             # now eliminate "definitions" (i.e. `setfield!`) calls
             # (NOTE the allocation itself will be eliminated by DCE pass later)
-            for idx in du.defs
-                idx == newidx && continue # this is allocation
+            for didx in du.defs
+                didx == defidx && continue # this is allocation
                 # verify this statement won't throw, otherwise it can't be eliminated safely
-                ssa = SSAValue(idx)
-                if is_nothrow(ir, ssa)
-                    ir[ssa][:stmt] = nothing
+                setfield_ssa = SSAValue(didx)
+                if is_nothrow(ir, setfield_ssa)
+                    ir[setfield_ssa][:stmt] = nothing
                 else
                     # We can't eliminate this statement, because it might still
                     # throw an error, but we can mark it as effect-free since we
                     # know we have removed all uses of the mutable allocation.
                     # As a result, if we ever do prove nothrow, we can delete
                     # this statement then.
-                    add_flag!(ir[ssa], IR_FLAG_EFFECT_FREE)
+                    add_flag!(ir[setfield_ssa], IR_FLAG_EFFECT_FREE)
                 end
             end
         end
@@ -1870,7 +1869,7 @@ function sroa_mutables!(ir::IRCode, defuses::IdDict{Int, Tuple{SPCSet, SSADefUse
             # this means all ccall preserves have been replaced with forwarded loads
             # so we can potentially eliminate the allocation, otherwise we must preserve
             # the whole allocation.
-            push!(intermediaries, newidx)
+            push!(intermediaries, defidx)
         end
         # Insert the new preserves
         for (useidx, new_preserves) in preserve_uses
