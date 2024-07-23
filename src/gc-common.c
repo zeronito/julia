@@ -6,9 +6,6 @@
 #include "julia_gcext.h"
 #include "julia_assert.h"
 #include "threading.h"
-#ifdef __GLIBC__
-#include <malloc.h> // for malloc_trim
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -113,6 +110,21 @@ JL_DLLEXPORT void jl_gc_set_cb_notify_gc_pressure(jl_gc_cb_notify_gc_pressure_t 
         jl_gc_register_callback(&gc_cblist_notify_gc_pressure, (jl_gc_cb_func_t)cb);
     else
         jl_gc_deregister_callback(&gc_cblist_notify_gc_pressure, (jl_gc_cb_func_t)cb);
+}
+
+// =========================================================================== //
+// malloc wrappers, aligned allocation
+// =========================================================================== //
+
+size_t memory_block_usable_size(void *p) JL_NOTSAFEPOINT
+{
+#if defined(_OS_WINDOWS_)
+    return _aligned_msize(p, JL_CACHE_BYTE_ALIGNMENT, 0);
+#elif defined(_OS_DARWIN_)
+    return malloc_size(p);
+#else
+    return malloc_usable_size(p);
+#endif
 }
 
 // =========================================================================== //

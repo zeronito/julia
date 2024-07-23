@@ -9,9 +9,6 @@
 #include "julia_atomics.h"
 #include "julia_gcext.h"
 #include "julia_assert.h"
-#ifdef __GLIBC__
-#include <malloc.h> // for malloc_trim
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -579,11 +576,6 @@ void jl_gc_count_allocd(size_t sz) JL_NOTSAFEPOINT
     jl_batch_accum_heap_size(ptls, sz);
 }
 
-void jl_gc_count_freed(size_t sz) JL_NOTSAFEPOINT
-{
-    jl_batch_accum_free_size(jl_current_task->ptls, sz);
-}
-
 // Only safe to update the heap inside the GC
 static void combine_thread_gc_counts(jl_gc_num_t *dest, int update_heap) JL_NOTSAFEPOINT
 {
@@ -664,13 +656,15 @@ static void jl_gc_free_memory(jl_value_t *v, int isaligned) JL_NOTSAFEPOINT
     jl_genericmemory_t *m = (jl_genericmemory_t*)v;
     assert(jl_genericmemory_how(m) == 1 || jl_genericmemory_how(m) == 2);
     char *d = (char*)m->ptr;
+    size_t freed_bytes = memory_block_usable_size(d);
+    assert(freed_bytes != 0);
     if (isaligned)
         jl_free_aligned(d);
     else
         free(d);
     jl_atomic_store_relaxed(&gc_heap_stats.heap_size,
-        jl_atomic_load_relaxed(&gc_heap_stats.heap_size) - jl_genericmemory_nbytes(m));
-    gc_num.freed += jl_genericmemory_nbytes(m);
+        jl_atomic_load_relaxed(&gc_heap_stats.heap_size) - freed_bytes);
+    gc_num.freed += freed_bytes;
     gc_num.freecall++;
 }
 
@@ -3739,11 +3733,13 @@ JL_DLLEXPORT void *jl_gc_managed_malloc(size_t sz)
     if (b == NULL)
         jl_throw(jl_memory_exception);
 
+    size_t allocated_bytes = memory_block_usable_size(b);
+    assert(allocated_bytes >= allocsz);
     jl_atomic_store_relaxed(&ptls->gc_tls.gc_num.allocd,
-        jl_atomic_load_relaxed(&ptls->gc_tls.gc_num.allocd) + allocsz);
+        jl_atomic_load_relaxed(&ptls->gc_tls.gc_num.allocd) + allocated_bytes);
     jl_atomic_store_relaxed(&ptls->gc_tls.gc_num.malloc,
         jl_atomic_load_relaxed(&ptls->gc_tls.gc_num.malloc) + 1);
-    jl_batch_accum_heap_size(ptls, allocsz);
+    jl_batch_accum_heap_size(ptls, allocated_bytes);
 #ifdef _OS_WINDOWS_
     SetLastError(last_error);
 #endif
