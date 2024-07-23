@@ -131,6 +131,22 @@ See also [`decode_overlong`](@ref) and [`show_invalid`](@ref).
 """
 isoverlong(c::AbstractChar) = false
 
+"""
+    hascodepoint(c::AbstractChar) -> Bool
+
+Return `true` if [`codepoint(c)`](@ref) will return a codepoint
+value, or `false` if it will throw an error, e.g. for
+malformed or overlong character encodings.
+
+An [`isvalid`](@ref) character must always have a codepoint,
+but the converse is not necessarily true: for example, `hascodepoint`
+will return `true` for both `'\\U110000'` and `'\\ud800'`, but
+`isvalid` will return `false` for these characters because they
+cannot be present in any valid Unicode string (being too large
+in the first case, and part of a UTF-16 surrogate pair in the second case).
+"""
+hascodepoint(c::AbstractChar) = !ismalformed(c) & !isoverlong(c)
+
 @constprop :aggressive function UInt32(c::Char)
     # TODO: use optimized inline LLVM
     u = bitcast(UInt32, c)
@@ -279,8 +295,8 @@ end
 """
     show_invalid(io::IO, c::AbstractChar)
 
-Called by `show(io, c)` when [`isoverlong(c)`](@ref) or
-[`ismalformed(c)`](@ref) return `true`.   Subclasses
+Called by `show(io, c)` when [`hascodepoint(c)`](@ref)
+returns `false`.   Subclasses
 of `AbstractChar` should define `Base.show_invalid` methods
 if they support storing invalid character data.
 """
@@ -305,7 +321,7 @@ function show(io::IO, c::AbstractChar)
             return
         end
     end
-    if isoverlong(c) || ismalformed(c)
+    if !hascodepoint(c)
         show_invalid(io, c)
     elseif isprint(c)
         write(io, 0x27)
