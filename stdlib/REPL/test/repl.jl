@@ -1958,9 +1958,7 @@ let io = IOBuffer()
 end
 
 @testset "Docstrings" begin
-    undoc = Docs.undocumented_names(REPL)
-    @test_broken isempty(undoc)
-    @test undoc == [:AbstractREPL, :BasicREPL, :LineEditREPL, :StreamREPL]
+    @test isempty(Docs.undocumented_names(REPL))
 end
 
 @testset "Dummy Pkg prompt" begin
