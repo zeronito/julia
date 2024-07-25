@@ -22,6 +22,7 @@ PreserveUse(idx::Int)  = SSAUse(:preserve, idx)
 NoPreserve()           = SSAUse(:nopreserve, 0)
 IsdefinedUse(idx::Int) = SSAUse(:isdefined, idx)
 FinalizerUse(idx::Int) = SSAUse(:finalizer, idx)
+InvokeUse(idx::Int)    = SSAUse(:invoke, idx)
 
 """
     du::SSADefUse
@@ -190,18 +191,15 @@ function collect_leaves(compact::IncrementalCompact, @nospecialize(val), @nospec
     return walk_to_defs(compact, val, typeconstraint, predecessors, 𝕃ₒ)
 end
 
-function trivial_walker(@nospecialize(pi), @nospecialize(idx))
-    return nothing
-end
-
-function pi_walker(@nospecialize(pi), @nospecialize(idx))
-    if isa(pi, PiNode)
-        return LiftedValue(pi.val)
+trivial_walker(@nospecialize(π), @nospecialize(defssa)) = nothing
+function pi_walker(@nospecialize(π), @nospecialize(defssa))
+    if isa(π, PiNode)
+        return LiftedValue(π.val)
     end
     return nothing
 end
 
-function simple_walk(compact::IncrementalCompact, @nospecialize(defssa#=::AnySSAValue=#), callback=trivial_walker)
+function simple_walk(compact::IncrementalCompact, @nospecialize(defssa::AnySSAValue), callback=trivial_walker)
     while true
         if isa(defssa, OldSSAValue)
             if already_inserted(compact, defssa)
@@ -241,12 +239,12 @@ function simple_walk(compact::IncrementalCompact, @nospecialize(defssa#=::AnySSA
     end
 end
 
-function simple_walk_constraint(compact::IncrementalCompact, @nospecialize(defssa#=::AnySSAValue=#),
+function simple_walk_constraint(compact::IncrementalCompact, @nospecialize(defssa::AnySSAValue),
                                 @nospecialize(typeconstraint))
-    callback = function (@nospecialize(pi), @nospecialize(idx))
-        if isa(pi, PiNode)
-            typeconstraint = typeintersect(typeconstraint, widenconst(pi.typ))
-            return LiftedValue(pi.val)
+    callback = function (@nospecialize(π), @nospecialize(defssa))
+        if isa(π, PiNode)
+            typeconstraint = typeintersect(typeconstraint, widenconst(π.typ))
+            return LiftedValue(π.val)
         end
         return nothing
     end
@@ -638,8 +636,10 @@ end
 
 struct SkipToken end; const SKIP_TOKEN = SkipToken()
 
-function lifted_value(compact::IncrementalCompact, @nospecialize(old_node_ssa#=::AnySSAValue=#), @nospecialize(old_value),
-                      lifted_philikes::Vector{LiftedPhilike}, lifted_leaves::Union{LiftedLeaves, LiftedDefs}, reverse_mapping::IdDict{AnySSAValue, Int},
+function lifted_value(compact::IncrementalCompact, @nospecialize(old_node_ssa::AnySSAValue),
+                      @nospecialize(old_value), lifted_philikes::Vector{LiftedPhilike},
+                      lifted_leaves::Union{LiftedLeaves, LiftedDefs},
+                      reverse_mapping::IdDict{AnySSAValue, Int},
                       walker_callback)
     val = old_value
     if is_old(compact, old_node_ssa) && isa(val, SSAValue)
@@ -1142,10 +1142,8 @@ const SPCSet = IdSet{Int}
 struct IntermediaryCollector
     intermediaries::SPCSet
 end
-function (this::IntermediaryCollector)(@nospecialize(pi), @nospecialize(ssa))
-    if !isa(pi, Expr)
-        push!(this.intermediaries, ssa.id)
-    end
+function (this::IntermediaryCollector)(@nospecialize(π), @nospecialize(defssa::AnySSAValue))
+    isa(π, Expr) || push!(this.intermediaries, defssa.id)
     return nothing
 end
 
@@ -1242,7 +1240,8 @@ function sroa_pass!(ir::IRCode, inlining::Union{Nothing,InliningState}=nothing)
             update_scope_mapping!(scope_mapping, bb+1, bbs)
         end
         # check whether this statement is `getfield` / `setfield!` (or other "interesting" statement)
-        is_setfield = is_isdefined = is_finalizer = is_keyvalue_get = false
+        is_setfield = is_isdefined = is_finalizer = false
+        invoke_mi = nothing
         field_ordering = :unspecified
         if is_known_call(stmt, setfield!, compact)
             4 <= length(stmt.args) <= 5 || continue
@@ -1317,6 +1316,15 @@ function sroa_pass!(ir::IRCode, inlining::Union{Nothing,InliningState}=nothing)
                 compact[idx] = form_new_preserves(stmt, preserved, new_preserves)
             end
             continue
+        elseif is_known_invoke_or_call(stmt, Core.OptimizedGenerics.KeyValue.get, compact)
+            2 == (length(stmt.args) - (isexpr(stmt, :invoke) ? 2 : 1)) || continue
+            lift_keyvalue_get!(compact, idx, stmt, 𝕃ₒ)
+            continue
+        elseif isexpr(stmt, :invoke)
+            length(stmt.args) ≥ 1 || continue
+            mi = stmt.args[1]
+            mi isa MethodInstance || continue
+            invoke_mi = mi
         else # TODO: This isn't the best place to put these
             if is_known_call(stmt, typeassert, compact)
                 canonicalize_typeassert!(compact, idx, stmt)
@@ -1328,9 +1336,6 @@ function sroa_pass!(ir::IRCode, inlining::Union{Nothing,InliningState}=nothing)
                 lift_comparison!(isa, compact, idx, stmt, 𝕃ₒ)
             elseif is_known_call(stmt, Core.ifelse, compact)
                 fold_ifelse!(compact, idx, stmt, 𝕃ₒ)
-            elseif is_known_invoke_or_call(stmt, Core.OptimizedGenerics.KeyValue.get, compact)
-                2 == (length(stmt.args) - (isexpr(stmt, :invoke) ? 2 : 1)) || continue
-                lift_keyvalue_get!(compact, idx, stmt, 𝕃ₒ)
             elseif is_known_call(stmt, Core.current_scope, compact)
                 length(stmt.args) == 1 || continue
                 scope_mapping !== nothing || continue
@@ -1345,56 +1350,69 @@ function sroa_pass!(ir::IRCode, inlining::Union{Nothing,InliningState}=nothing)
             continue
         end
 
+        function analyze_val(@nospecialize val)
+            struct_typ = widenconst(argextype(val, compact))
+            struct_argtyp = argument_datatype(struct_typ)
+            if struct_argtyp === nothing
+                if isa(struct_typ, Union) && is_isdefined
+                    lift_comparison!(isdefined, compact, idx, stmt, 𝕃ₒ)
+                end
+                return nothing
+            end
+            struct_typ_name = struct_argtyp.name
+            struct_typ_name.atomicfields == C_NULL || return nothing # TODO: handle more
+            if !((field_ordering === :unspecified) ||
+                 (field_ordering isa Const && field_ordering.val === :not_atomic))
+                return nothing
+            end
+            if ismutabletypename(struct_typ_name)
+                isa(val, SSAValue) || return nothing
+                let intermediaries = SPCSet()
+                    def = simple_walk(compact, val, IntermediaryCollector(intermediaries))
+                    # Mutable stuff here
+                    isa(def, SSAValue) || return nothing
+                    if defuses === nothing
+                        defuses = IdDict{Int, Tuple{SPCSet, SSADefUse}}()
+                    end
+                    mid, defuse = get!(()->(SPCSet(),SSADefUse()), defuses, def.id)
+                    if is_setfield
+                        push!(defuse.defs, idx)
+                    elseif is_isdefined
+                        push!(defuse.uses, IsdefinedUse(idx))
+                    elseif is_finalizer
+                        push!(defuse.uses, FinalizerUse(idx))
+                    elseif invoke_mi !== nothing
+                        # TODO analyze this case using EA for earger finalizer inlining (and possibly for mutable SROA too?)
+                        return nothing
+                    else
+                        push!(defuse.uses, GetfieldUse(idx))
+                    end
+                    union!(mid, intermediaries)
+                end
+                return nothing
+            elseif is_setfield || is_finalizer
+                return nothing # invalid `setfield!` or `Core.finalizer` call, but just ignore here
+            elseif invoke_mi !== nothing
+                return nothing # nothing to do
+            elseif is_isdefined
+                return nothing # TODO?
+            end
+            return struct_typ
+        end
+
         if is_finalizer
-            val = stmt.args[3]
+            analyze_val(stmt.args[3])
+            continue
+        elseif invoke_mi !== nothing
+            for i = 2:length(stmt.args)
+                analyze_val(stmt.args[i])
+            end
+            continue
         else
             # analyze `getfield` / `isdefined` / `setfield!` call
             val = stmt.args[2]
-        end
-        struct_typ = widenconst(argextype(val, compact))
-        struct_argtyp = argument_datatype(struct_typ)
-        if struct_argtyp === nothing
-            if isa(struct_typ, Union) && is_isdefined
-                lift_comparison!(isdefined, compact, idx, stmt, 𝕃ₒ)
-            end
-            continue
-        end
-        struct_typ_name = struct_argtyp.name
-
-        struct_typ_name.atomicfields == C_NULL || continue # TODO: handle more
-        if !((field_ordering === :unspecified) ||
-             (field_ordering isa Const && field_ordering.val === :not_atomic))
-            continue
-        end
-
-        # analyze this mutable struct here for the later pass
-        if ismutabletypename(struct_typ_name)
-            isa(val, SSAValue) || continue
-            let intermediaries = SPCSet()
-                callback = IntermediaryCollector(intermediaries)
-                def = simple_walk(compact, val, callback)
-                # Mutable stuff here
-                isa(def, SSAValue) || continue
-                if defuses === nothing
-                    defuses = IdDict{Int, Tuple{SPCSet, SSADefUse}}()
-                end
-                mid, defuse = get!(()->(SPCSet(),SSADefUse()), defuses, def.id)
-                if is_setfield
-                    push!(defuse.defs, idx)
-                elseif is_isdefined
-                    push!(defuse.uses, IsdefinedUse(idx))
-                elseif is_finalizer
-                    push!(defuse.uses, FinalizerUse(idx))
-                else
-                    push!(defuse.uses, GetfieldUse(idx))
-                end
-                union!(mid, intermediaries)
-            end
-            continue
-        elseif is_setfield || is_finalizer
-            continue # invalid `setfield!` or `Core.finalizer` call, but just ignore here
-        elseif is_isdefined
-            continue # TODO?
+            struct_typ = analyze_val(val)
+            struct_typ !== nothing || continue
         end
 
         # perform SROA on immutable structs here on
