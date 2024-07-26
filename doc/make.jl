@@ -10,6 +10,7 @@ Pkg.instantiate()
 
 using Documenter
 import LibGit2
+using Logging: with_logger, NullLogger
 
 baremodule GenStdLib end
 
@@ -371,7 +372,7 @@ else
 end
 
 const output_path = joinpath(buildroot, "doc", "_build", (render_pdf ? "pdf" : "html"), "en")
-makedocs(
+doc = makedocs(
     build     = output_path,
     modules   = [Main, Base, Core, [Base.root_module(Base, stdlib.stdlib) for stdlib in STDLIB_DOCS]...],
     clean     = true,
@@ -379,13 +380,37 @@ makedocs(
     linkcheck = "linkcheck=true" in ARGS,
     linkcheck_ignore = ["https://bugs.kde.org/show_bug.cgi?id=136779"], # fails to load from nanosoldier?
     checkdocs = :exports, # we really want :public but thats not available yet https://github.com/JuliaDocs/Documenter.jl/issues/1506
-    warnonly = :missing_docs, # warn about missing docstrings, but don't fail
+    warnonly  = :missing_docs, # warn about missing docstrings, but don't fail
     format    = format,
     sitename  = "The Julia Language",
     authors   = "The Julia Project",
     pages     = PAGES,
     remotes   = documenter_stdlib_remotes,
+    debug     = true, # makes makedocs return the Documenter object for use later
 )
+
+
+const known_missing_from_manual = 299
+
+# Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
+# Only check on Linux 64-bit because the number is platform-dependent
+if !in("deploy", ARGS) && Sys.islinux() && Sys.WORD_SIZE == 64
+    # ignore logging in the report because makedocs has already run this internally, we just want the number out
+    missing_from_manual = with_logger(NullLogger()) do
+        Documenter.missingdocs(doc)
+    end
+    if missing_from_manual > known_missing_from_manual
+        error("""
+        New docstrings have been added for exported functions that are missing from the manual.
+        Please add these to the manual.
+        """)
+    elseif missing_from_manual < known_missing_from_manual
+        error("""
+        Great, the number of missing docstrings in the manual has decreased!
+        Update `const known_missing_from_manual = $known_missing_from_manual` to $missing_from_manual in `doc/make.jl` to pass this check.
+        """)
+    end
+end
 
 # Update URLs to external stdlibs (JuliaLang/julia#43199)
 for (root, _, files) in walkdir(output_path), file in joinpath.(root, files)
