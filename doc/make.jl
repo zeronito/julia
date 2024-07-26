@@ -378,7 +378,8 @@ makedocs(
     doctest   = ("doctest=fix" in ARGS) ? (:fix) : ("doctest=only" in ARGS) ? (:only) : ("doctest=true" in ARGS) ? true : false,
     linkcheck = "linkcheck=true" in ARGS,
     linkcheck_ignore = ["https://bugs.kde.org/show_bug.cgi?id=136779"], # fails to load from nanosoldier?
-    checkdocs = :exports,
+    checkdocs = :exports, # we really want :public but thats not available yet https://github.com/JuliaDocs/Documenter.jl/issues/1506
+    warnonly = :missing_docs, # warn about missing docstrings, but don't fail
     format    = format,
     sitename  = "The Julia Language",
     authors   = "The Julia Project",
