@@ -3932,3 +3932,6 @@ end
 @test callme(2.0) === 2
 @test callme(3, 3) === 3
 @test callme(4, 4, 4) === 4.0
+
+# Ambiguous 1-arg anymous vs macrosig
+@test_parseerror "function (@foo(a)) end"

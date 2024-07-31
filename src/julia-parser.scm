@@ -1329,7 +1329,8 @@
 
 (define (valid-func-sig? paren sig)
   (and (pair? sig)
-       (or (memq (car sig) '(macrocall call tuple))
+       (or (memq (car sig) '(call tuple))
+           (and (not paren) (eq? (car sig) 'macrocall))
            (and paren (eq? (car sig) 'block))
            (and paren (eq? (car sig) '...))
            (and (eq? (car sig) '|::|)
