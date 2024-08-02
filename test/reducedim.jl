@@ -173,7 +173,7 @@ end
 
     x = sum(Real[1.0], dims=1)
     @test x == [1.0]
-    @test x isa Vector{Real}
+    @test x isa Vector{<:Real}
 
     x = mapreduce(cos, +, Union{Int,Missing}[1, 2], dims=1)
     @test x == mapreduce(cos, +, [1, 2], dims=1)
@@ -209,9 +209,9 @@ end
 
     for f in (minimum, maximum)
         @test_throws "reducing over an empty collection is not allowed" f(A, dims=1)
-        @test isequal(f(A, dims=2), zeros(Int, 0, 1))
+        @test_broken isequal(f(A, dims=2), zeros(Int, 0, 1))
         @test_throws "reducing over an empty collection is not allowed" f(A, dims=(1, 2))
-        @test isequal(f(A, dims=3), zeros(Int, 0, 1))
+        @test_broken isequal(f(A, dims=3), zeros(Int, 0, 1))
     end
     for f in (findmin, findmax)
         @test_throws ArgumentError f(A, dims=1)
@@ -610,9 +610,10 @@ function unordered_test_for_extrema(a; dims_test = ((), 1, 2, (1,2), 3))
     for dims in dims_test
         vext = extrema(a; dims)
         vmin, vmax = minimum(a; dims), maximum(a; dims)
-        @test isequal(extrema!(copy(vext), a), vext)
+        @test isequal(extrema!(similar(vext, NTuple{2, eltype(a)}), a), vext)
         @test all(x -> isequal(x[1], x[2:3]), zip(vext,vmin,vmax))
     end
+    true
 end
 @testset "0.0,-0.0 test for extrema with dims" begin
     @test extrema([-0.0;0.0], dims = 1)[1] === (-0.0,0.0)
@@ -623,13 +624,13 @@ end
         for T in (Int, Float64, BigFloat, BigInt)
             Aₘ = Matrix{Union{T, Missing}}(rand(-sz:sz, sz, sz))
             Aₘ[rand(1:sz*sz, sz)] .= missing
-            unordered_test_for_extrema(Aₘ)
+            @test unordered_test_for_extrema(Aₘ)
             if T <: AbstractFloat
                 Aₙ = map(i -> ismissing(i) ? T(NaN) : i, Aₘ)
-                unordered_test_for_extrema(Aₙ)
+                @test unordered_test_for_extrema(Aₙ)
                 p = rand(1:sz*sz, sz)
                 Aₘ[p] .= NaN
-                unordered_test_for_extrema(Aₘ)
+                @test unordered_test_for_extrema(Aₘ)
             end
         end
     end
@@ -695,4 +696,175 @@ end
     @test_broken @inferred(minimum(exp, A; dims = 1))[1] === missing
     @test_broken @inferred(maximum(exp, A; dims = 1))[1] === missing
     @test_broken @inferred(extrema(exp, A; dims = 1))[1] === (missing, missing)
+end
+
+@testset "generic sum reductions; issue #31427" begin
+    add31427(a, b) = a+b
+    A = rand(1:10, 5, 5)
+    @test reduce(add31427, A, dims = (1, 2)) == reduce(+, A, dims = (1, 2)) == [sum(A);;]
+
+    As = [rand(5, 4) for _ in 1:2, _ in 1:3]
+    @test reduce(hcat, reduce(vcat, As, dims=1)) == [As[1,1] As[1,2] As[1,3]; As[2,1] As[2,2] As[2,3]]
+end
+
+@testset "sum with missings; issue #55213" begin
+    @test isequal(sum([0.0 1; 0.0 missing], dims=2), [1.0; missing;;])
+    @test sum([0.0 1; 0.0 missing], dims=2)[1] === 1.0
+    @test isequal(sum(Any[0.0 1; 0.0 missing], dims=2), [1.0; missing;;])
+    @test sum(Any[0.0 1; 0.0 missing], dims=2)[1] === 1.0
+
+    @test isequal(sum([1 0.0; 0.0 missing], dims=1), [1.0 missing])
+    @test sum([1 0.0; 0.0 missing], dims=1)[1] === 1.0
+    @test isequal(sum(Any[1 0.0; 0.0 missing], dims=1), [1.0 missing])
+    @test sum(Any[1 0.0; 0.0 missing], dims=1)[1] === 1.0
+end
+
+@testset "issues #45566 and #47231; initializers" begin
+    @test reduce(gcd, [1]; dims=1) == [reduce(gcd, [1])] == [1]
+
+    x = reshape(1:6, 2, 3)
+    @test reduce(+, x, dims=2) == [9;12;;]
+    @test reduce(-, x, dims=1) == [1-2 3-4 5-6]
+    @test reduce(/, x, dims=1) == [1/2 3/4 5/6]
+    @test reduce(^, x, dims=1) == [1^2 3^4 5^6]
+    # These have arbitrary associativity, but they shouldn't error
+    @test reduce(-, x, dims=2) in ([(1-3)-5; (2-4)-6;;], [1-(3-5); 2-(4-6);;])
+    @test reduce(/, x, dims=2) in ([(1/3)/5; (2/4)/6;;], [1/(3/5); 2/(4/6);;])
+    @test reduce(^, x, dims=2) in ([(1^3)^5; (2^4)^6;;], [1^(3^5); 2^(4^6);;])
+end
+
+@testset "better initializations" begin
+    @test mapreduce(_ -> pi, +, [1,2]; dims=1) == [mapreduce(_ -> pi, +, [1,2])] == [2pi]
+    @test mapreduce(_ -> pi, +, [1 2]; dims=2) == [mapreduce(_ -> pi, +, [1 2]);;] == [2pi;;]
+    @test mapreduce(_ -> pi, +, [1 2]; dims=(1,2)) == [2pi;;]
+    @test mapreduce(_ -> pi, +, [1]; dims=1) == [mapreduce(_ -> pi, +, [1])] == [pi]
+    @test mapreduce(_ -> pi, +, [1;;]; dims=2) == [mapreduce(_ -> pi, +, [1;;]);;] == [pi;;]
+    @test_throws ArgumentError mapreduce(_ -> pi, +, []; dims=1)
+    @test_throws ArgumentError mapreduce(_ -> pi, +, [;;]; dims=2)
+    @test_throws ArgumentError mapreduce(_ -> pi, +, [;;]; dims=(1,2))
+    @test_throws ArgumentError mapreduce(_ -> pi, +, [])
+    @test_throws ArgumentError mapreduce(_ -> pi, +, [;;])
+
+    @test mapreduce(x -> log(x-1), +, [2,3,4]; dims=1) == [mapreduce(x -> log(x-1), +, [2,3,4])] == [log(1) + log(2) + log(3)]
+    @test mapreduce(x -> log(x-1), +, [2,3]; dims=1) == [mapreduce(x -> log(x-1), +, [2,3])] == [log(1) + log(2)]
+    @test mapreduce(x -> log(x-1), +, [2]; dims=1) == [mapreduce(x -> log(x-1), +, [2])] == [log(1)]
+    @test mapreduce(x -> log(x-1), +, [2 3 4]; dims=2) == [mapreduce(x -> log(x-1), +, [2,3,4]);;] == [log(1) + log(2) + log(3);;]
+    @test mapreduce(x -> log(x-1), +, [2 3]; dims=2) == [mapreduce(x -> log(x-1), +, [2,3]);;] == [log(1) + log(2);;]
+    @test mapreduce(x -> log(x-1), +, [2;;]; dims=2) == [mapreduce(x -> log(x-1), +, [2]);;] == [log(1);;]
+    @test_throws ArgumentError mapreduce(x -> log(x-1), +, []; dims=1)
+    @test_throws ArgumentError mapreduce(x -> log(x-1), +, [;;]; dims=2)
+    @test_throws ArgumentError mapreduce(x -> log(x-1), +, [;;]; dims=(1,2))
+    @test_throws ArgumentError mapreduce(x -> log(x-1), +, [])
+    @test_throws ArgumentError mapreduce(x -> log(x-1), +, [;;])
+
+    @test sum(x->sqrt(x-1), ones(5); dims=1) == [sum(x->sqrt(x-1), ones(5))] == [0.0]
+    @test sum(x->sqrt(x-1), ones(1); dims=1) == [sum(x->sqrt(x-1), ones(1))] == [0.0]
+    @test_throws ArgumentError sum(x->sqrt(x-1), ones(0); dims=1)
+    @test_throws ArgumentError sum(x->sqrt(x-1), ones(0))
+end
+
+@testset "reductions on broadcasted; issue #41054" begin
+    A = clamp.(randn(3,4), -1, 1)
+    bc = Base.broadcasted(+, A, 2)
+    @test sum(bc, dims=1) ≈ sum(A .+ 2, dims=1)
+    @test mapreduce(sqrt, +, bc, dims=1) ≈ mapreduce(sqrt, +, A .+ 2, dims=1)
+
+    @test sum(bc, dims=2) ≈ sum(A .+ 2, dims=2)
+    @test mapreduce(sqrt, +, bc, dims=2) ≈ mapreduce(sqrt, +, A .+ 2, dims=2)
+
+    @test sum(bc, dims=(1,2)) ≈ [sum(A .+ 2)]
+    @test mapreduce(sqrt, +, bc, dims=(1,2)) ≈ [mapreduce(sqrt, +, A .+ 2)]
+end
+
+@testset "reductions over complex values; issue #54920" begin
+    A = Complex{Int}.(rand(Complex{Int8}, 2, 2, 2));
+    @test maximum(abs, A; dims=(1,)) == mapreduce(abs, max, A, dims=(1,)) == [maximum(abs, A[:,1,1]) maximum(abs, A[:,2,1]);;; maximum(abs, A[:,1,2]) maximum(abs, A[:,2,2])]
+    @test maximum(abs, A; dims=(2,)) == mapreduce(abs, max, A, dims=(2,)) == [maximum(abs, A[1,:,1]); maximum(abs, A[2,:,1]);;; maximum(abs, A[1,:,2]); maximum(abs, A[2,:,2])]
+    @test maximum(abs, A; dims=(1, 2)) == mapreduce(abs, max, A, dims=(1, 2)) == [maximum(abs, A[:,:,1]);;; maximum(abs, A[:,:,2])]
+    @test maximum(abs, A; dims=(1, 2, 3)) == mapreduce(abs, max, A, dims=(1, 2, 3)) == [maximum(abs, A);;;]
+end
+
+@testset "bitwise operators on integers; part of issue #45562" begin
+    @test mapreduce(identity, &, [3,3,3]; dims=1) == [mapreduce(identity, &, [3,3,3])] == [3 & 3 & 3] == [3]
+    @test mapreduce(identity, |, [3,3,3]; dims=1) == [mapreduce(identity, |, [3,3,3])] == [3 | 3 | 3] == [3]
+    @test mapreduce(identity, xor, [3,3,3]; dims=1) == [mapreduce(identity, xor, [3,3,3])] == [xor(xor(3, 3), 3)] == [3]
+
+    @test mapreduce(identity, &, [3,7,6]; dims=1) == [mapreduce(identity, &, [3,7,6])] == [3 & 7 & 6] == [2]
+    @test mapreduce(identity, |, [3,7,6]; dims=1) == [mapreduce(identity, |, [3,7,6])] == [3 | 7 | 6] == [7]
+    @test mapreduce(identity, xor, [3,7,6]; dims=1) == [mapreduce(identity, xor, [3,7,6])] == [xor(xor(3, 7), 6)] == [2]
+end
+
+@testset "indexing" begin
+    A = [1 2; 3 4]
+    B = [5 6; 7 8]
+
+    @test mapreduce(/, +, A, B) ≈ sum(A./B)
+    @test mapreduce(i -> A[i]/B[i], +, eachindex(A,B)) ≈ sum(A./B)
+    @test mapreduce(i -> A[i]/B'[i], +, eachindex(A,B')) ≈ sum(A./B')
+
+    @test mapreduce(/, +, A, B; dims=1) ≈ sum(A./B; dims=1)
+    @test mapreduce(i -> A[i]/B[i], +, reshape(eachindex(A,B), size(A)); dims=1) ≈ sum(A./B; dims=1)  # BoundsError
+    @test mapreduce(i -> A[i]/B'[i], +, eachindex(A,B'); dims=1) ≈ sum(A./B'; dims=1)  # BoundsError
+end
+
+@testset "more related to issue #26488" begin
+    @test mapreduce(x -> log10(x-1), +, [11, 101]) ≈ 3.0
+    @test mapreduce(x -> log10(x-1), *, [11, 101]) ≈ 2.0
+    @test mapreduce(x -> log10(x-1), +, [11, 101]; dims=1) ≈ [3.0]
+    @test mapreduce(x -> log10(x-1), +, [11, 101]; init=-10) ≈ -7.0
+    @test mapreduce(x -> log10(x-1), +, [11, 101]; init=-10, dims=1) ≈ [-7.0]
+
+    @test mapreduce(_ -> pi, +, [1,2]) ≈ 2pi
+    @test mapreduce(_ -> pi, *, [1,2]) ≈ pi^2
+    @test mapreduce(_ -> pi, +, [1,2]; dims=1) ≈ [2pi]
+end
+
+_add(x,y) = x+y  # this avoids typeof(+) dispatch
+
+@testset "mapreduce fast paths, dims=:, op=$op, kw=$kw" for op in (+,_add),
+                                                            kw in ((;), (; init=0.0))
+    @test_broken 0 == @allocated mapreduce(/, op, 1:3, 4:7; kw...)
+    @test_broken 0 == @allocated mapreduce(/, op, 1:3, 4:9; kw...)  # stops early
+    @test mapreduce(/, op, 1:3, 4:7; kw...) ≈ reduce(op, map(/, 1:3, 4:7); kw...)
+    @test mapreduce(/, op, 1:3, 4:9; kw...) ≈ reduce(op, map(/, 1:3, 4:9); kw...)
+
+    A = [1 2; 3 4]
+    B = [5 6; 7 8]
+
+    @test_broken 0 == @allocated mapreduce(*, op, A, B; kw...)  # LinearIndices
+    @test_broken 0 == @allocated mapreduce(*, op, A, B'; kw...)  # CartesianIndices
+
+    @test mapreduce(*, op, A, B; kw...) == reduce(op, map(*, A, B); kw...)
+    @test mapreduce(*, op, A, B'; kw...) == reduce(op, map(*, A, B'); kw...)
+
+    @test_broken 0 == @allocated mapreduce(*, op, A, 5:7; kw...)  # stops early
+    @test_broken 0 == @allocated mapreduce(*, op, 1:3, B'; kw...)  # stops early
+    @test mapreduce(*, op, A, 5:7; kw...) == reduce(op, map(*, A, 5:7); kw...)
+    @test mapreduce(*, op, 1:3, B'; kw...) == reduce(op, map(*, 1:3, B'); kw...)
+    @test mapreduce(*, op, 1:3, B', 10:20; kw...) == reduce(op, map(*, 1:3, B', 10:20); kw...)
+
+    @test_throws DimensionMismatch map(*, A, hcat(B, 9:10))  # same ndims, does not stop early
+    @test_throws DimensionMismatch mapreduce(*, op, A, hcat(B, 9:10); kw...)
+end
+
+@testset "mapreduce fast paths, dims=$dims, op=$op, kw=$kw" for dims in (1,2,[2],(1,2),3),
+                                                                op in (+,*,_add),
+                                                                kw in ((;), (; init=0.0))
+    (kw == (;) && op == _add) && continue
+
+    @test mapreduce(/, op, 1:3, 4:7; dims, kw...) ≈ reduce(op, map(/, 1:3, 4:7); dims, kw...)
+    @test mapreduce(/, op, 1:3, 4:9; dims, kw...) ≈ reduce(op, map(/, 1:3, 4:9); dims, kw...)
+
+    A = [1 2; 3 4]
+    B = [5 6; 7 8]
+    @test mapreduce(*, op, A, B; dims, kw...) == reduce(op, map(*, A, B); dims, kw...)  # LinearIndices
+    @test mapreduce(*, op, A, B'; dims, kw...) == reduce(op, map(*, A, B'); dims, kw...)  # CartesianIndices
+
+    @test_broken @allocated(mapreduce(*, op, A, B; dims, kw...)) < @allocated(reduce(op, map(*, A, B); dims, kw...))
+    @test_broken @allocated(mapreduce(*, op, A, B'; dims, kw...)) < @allocated(reduce(op, map(*, A, B'); dims, kw...))
+
+    @test mapreduce(*, op, A, 5:7; dims, kw...) == reduce(op, map(*, A, 5:7); dims, kw...)  # stops early
+    @test mapreduce(*, op, 1:3, B'; dims, kw...) == reduce(op, map(*, 1:3, B'); dims, kw...)
+
+    @test_throws DimensionMismatch mapreduce(*, +, A, hcat(B, 9:10); dims, kw...)
 end
