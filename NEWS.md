@@ -102,6 +102,8 @@ New library features
   the uniquing checking ([#53474])
 * `RegexMatch` objects can now be used to construct `NamedTuple`s and `Dict`s ([#50988])
 * `Lockable` is now exported ([#54595])
+* The a new method `readdir(DirEntry, path)` will now return directory contents along with the
+  type of the entries in a vector of new `DirEntry` objects to provide more efficient `isfile` etc. checks ([#55393])
 
 Standard library changes
 ------------------------
