@@ -173,7 +173,7 @@ adjoint(S::SymTridiagonal{<:Number, <:Base.ReshapedArray{<:Number,1,<:Adjoint}})
 
 permutedims(S::SymTridiagonal) = S
 function permutedims(S::SymTridiagonal, perm)
-    Base.checkdims_perm(S, S, perm)
+    Base.checkdims_perm(axes(S), axes(S), perm)
     NTuple{2}(perm) == (2, 1) ? permutedims(S) : S
 end
 Base.copy(S::Adjoint{<:Any,<:SymTridiagonal}) = SymTridiagonal(map(x -> copy.(adjoint.(x)), (S.parent.dv, S.parent.ev))...)
@@ -181,7 +181,13 @@ Base.copy(S::Adjoint{<:Any,<:SymTridiagonal}) = SymTridiagonal(map(x -> copy.(ad
 ishermitian(S::SymTridiagonal) = isreal(S.dv) && isreal(_evview(S))
 issymmetric(S::SymTridiagonal) = true
 
-tr(S::SymTridiagonal) = sum(S.dv)
+tr(S::SymTridiagonal) = sum(symmetric, S.dv)
+
+@noinline function throw_diag_outofboundserror(n, sz)
+    sz1, sz2 = sz
+    throw(ArgumentError(LazyString(lazy"requested diagonal, $n, must be at least $(-sz1) ",
+            lazy"and at most $sz2 for an $(sz1)-by-$(sz2) matrix")))
+end
 
 function diag(M::SymTridiagonal{T}, n::Integer=0) where T<:Number
     # every branch call similar(..., ::Int) to make sure the
@@ -194,8 +200,7 @@ function diag(M::SymTridiagonal{T}, n::Integer=0) where T<:Number
     elseif absn <= size(M,1)
         return fill!(similar(M.dv, size(M,1)-absn), zero(T))
     else
-        throw(ArgumentError(string(lazy"requested diagonal, $n, must be at least $(-size(M, 1)) ",
-            lazy"and at most $(size(M, 2)) for an $(size(M, 1))-by-$(size(M, 2)) matrix")))
+        throw_diag_outofboundserror(n, size(M))
     end
 end
 function diag(M::SymTridiagonal, n::Integer=0)
@@ -210,8 +215,7 @@ function diag(M::SymTridiagonal, n::Integer=0)
     elseif n <= size(M,1)
         throw(ArgumentError("requested diagonal contains undefined zeros of an array type"))
     else
-        throw(ArgumentError(string(lazy"requested diagonal, $n, must be at least $(-size(M, 1)) ",
-            lazy"and at most $(size(M, 2)) for an $(size(M, 1))-by-$(size(M, 2)) matrix")))
+        throw_diag_outofboundserror(n, size(M))
     end
 end
 
@@ -353,7 +357,7 @@ isdiag(M::SymTridiagonal) =  iszero(_evview(M))
 function tril!(M::SymTridiagonal{T}, k::Integer=0) where T
     n = length(M.dv)
     if !(-n - 1 <= k <= n - 1)
-        throw(ArgumentError(string(lazy"the requested diagonal, $k, must be at least ",
+        throw(ArgumentError(LazyString(lazy"the requested diagonal, $k, must be at least ",
             lazy"$(-n - 1) and at most $(n - 1) in an $n-by-$n matrix")))
     elseif k < -1
         fill!(M.ev, zero(T))
@@ -372,7 +376,7 @@ end
 function triu!(M::SymTridiagonal{T}, k::Integer=0) where T
     n = length(M.dv)
     if !(-n + 1 <= k <= n + 1)
-        throw(ArgumentError(string(lazy"the requested diagonal, $k, must be at least ",
+        throw(ArgumentError(LazyString(lazy"the requested diagonal, $k, must be at least ",
             lazy"$(-n + 1) and at most $(n + 1) in an $n-by-$n matrix")))
     elseif k > 1
         fill!(M.ev, zero(T))
@@ -485,7 +489,7 @@ struct Tridiagonal{T,V<:AbstractVector{T}} <: AbstractMatrix{T}
         require_one_based_indexing(dl, d, du)
         n = length(d)
         if (length(dl) != n-1 || length(du) != n-1) && !(length(d) == 0 && length(dl) == 0 && length(du) == 0)
-            throw(ArgumentError(string("cannot construct Tridiagonal from incompatible ",
+            throw(ArgumentError(LazyString("cannot construct Tridiagonal from incompatible ",
                 "lengths of subdiagonal, diagonal and superdiagonal: ",
                 lazy"($(length(dl)), $(length(d)), $(length(du)))")))
         end
@@ -635,7 +639,7 @@ adjoint(S::Tridiagonal{<:Number, <:Base.ReshapedArray{<:Number,1,<:Adjoint}}) =
 transpose(S::Tridiagonal{<:Number}) = Tridiagonal(S.du, S.d, S.dl)
 permutedims(T::Tridiagonal) = Tridiagonal(T.du, T.d, T.dl)
 function permutedims(T::Tridiagonal, perm)
-    Base.checkdims_perm(T, T, perm)
+    Base.checkdims_perm(axes(T), axes(T), perm)
     NTuple{2}(perm) == (2, 1) ? permutedims(T) : T
 end
 Base.copy(aS::Adjoint{<:Any,<:Tridiagonal}) = (S = aS.parent; Tridiagonal(map(x -> copy.(adjoint.(x)), (S.du, S.d, S.dl))...))
@@ -658,7 +662,7 @@ function diag(M::Tridiagonal{T}, n::Integer=0) where T
     elseif abs(n) <= size(M,1)
         return fill!(similar(M.d, size(M,1)-abs(n)), zero(T))
     else
-        throw(ArgumentError(string(lazy"requested diagonal, $n, must be at least $(-size(M, 1)) ",
+        throw(ArgumentError(LazyString(lazy"requested diagonal, $n, must be at least $(-size(M, 1)) ",
             lazy"and at most $(size(M, 2)) for an $(size(M, 1))-by-$(size(M, 2)) matrix")))
     end
 end
@@ -724,7 +728,7 @@ end
     elseif j - i == 1
         @inbounds A.du[i] = x
     elseif !iszero(x)
-        throw(ArgumentError(string(lazy"cannot set entry ($i, $j) off ",
+        throw(ArgumentError(LazyString(lazy"cannot set entry ($i, $j) off ",
             lazy"the tridiagonal band to a nonzero value ($x)")))
     end
     return x
@@ -780,7 +784,7 @@ isdiag(M::Tridiagonal) = iszero(M.dl) && iszero(M.du)
 function tril!(M::Tridiagonal{T}, k::Integer=0) where T
     n = length(M.d)
     if !(-n - 1 <= k <= n - 1)
-        throw(ArgumentError(string(lazy"the requested diagonal, $k, must be at least ",
+        throw(ArgumentError(LazyString(lazy"the requested diagonal, $k, must be at least ",
             lazy"$(-n - 1) and at most $(n - 1) in an $n-by-$n matrix")))
     elseif k < -1
         fill!(M.dl, zero(T))
@@ -798,7 +802,7 @@ end
 function triu!(M::Tridiagonal{T}, k::Integer=0) where T
     n = length(M.d)
     if !(-n + 1 <= k <= n + 1)
-        throw(ArgumentError(string(lazy"the requested diagonal, $k, must be at least ",
+        throw(ArgumentError(LazyString(lazy"the requested diagonal, $k, must be at least ",
             lazy"$(-n + 1) and at most $(n + 1) in an $n-by-$n matrix")))
     elseif k > 1
         fill!(M.dl, zero(T))
@@ -949,7 +953,7 @@ function cholesky(S::SymTridiagonal, ::NoPivot = NoPivot(); check::Bool = true)
         check && checkpositivedefinite(-1)
         return Cholesky(S, 'U', convert(BlasInt, -1))
     end
-    T = choltype(eltype(S))
+    T = choltype(S)
     cholesky!(Hermitian(Bidiagonal{T}(diag(S, 0), diag(S, 1), :U)), NoPivot(); check = check)
 end
 
@@ -1036,8 +1040,26 @@ function _copyto_banded!(A::Tridiagonal, B::SymTridiagonal)
     return A
 end
 function _copyto_banded!(A::SymTridiagonal, B::Tridiagonal)
-    issymmetric(B) || throw(ArgumentError("cannot copy a non-symmetric Tridiagonal matrix to a SymTridiagonal"))
+    issymmetric(B) || throw(ArgumentError("cannot copy an asymmetric Tridiagonal matrix to a SymTridiagonal"))
     A.dv .= B.d
     _evview(A) .= B.du
     return A
+end
+
+# display
+function show(io::IO, T::Tridiagonal)
+    print(io, "Tridiagonal(")
+    show(io, T.dl)
+    print(io, ", ")
+    show(io, T.d)
+    print(io, ", ")
+    show(io, T.du)
+    print(io, ")")
+end
+function show(io::IO, S::SymTridiagonal)
+    print(io, "SymTridiagonal(")
+    show(io, eltype(S) <: Number ? S.dv : view(S, diagind(S, IndexStyle(S))))
+    print(io, ", ")
+    show(io, S.ev)
+    print(io, ")")
 end
