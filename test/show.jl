@@ -2534,9 +2534,9 @@ end
 
     str = String(take!(io))
 
-    @test contains(str, "\e[31m%17\e[39m)")
-    @test contains(str, "\e[31m%17\e[39m = ")
-    @test contains(str, "\e[31m%19\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%17\e[22m\e[39m)")
+    @test contains(str, "\e[91m\e[1m%17\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%19\e[22m\e[39m = ")
 
     function subbar(t, w)
         return sum(t) + w
@@ -2551,18 +2551,18 @@ end
 
     str = String(take!(io))
 
-    @test contains(str, "\e[31m%17\e[39m = ")
-    @test contains(str, "\e[31m%19\e[39m = ")
-    @test contains(str, "\e[31m%20\e[39m = ")
-    @test contains(str, "\e[31m%17\e[39m + \e[31m%19\e[39m)")
-    @test contains(str, "\e[31m%21\e[39m = ")
-    @test contains(str, "\e[31m%20\e[39m)")
-    @test contains(str, "\e[31m%21\e[39m,")
-    @test contains(str, "\e[31m%50\e[39m = ")
-    @test contains(str, "\e[31m%21\e[39m,")
-    @test contains(str, "\e[31m%52\e[39m = ")
-    @test contains(str, "\e[31m%53\e[39m = ")
-    @test contains(str, "\e[31m%52\e[39m,")
+    @test contains(str, "\e[91m\e[1m%17\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%19\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%20\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%17\e[22m\e[39m + \e[91m\e[1m%19\e[22m\e[39m")
+    @test contains(str, "\e[91m\e[1m%21\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%20\e[22m\e[39m)")
+    @test contains(str, "\e[91m\e[1m%21\e[22m\e[39m,")
+    @test contains(str, "\e[91m\e[1m%50\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%21\e[22m\e[39m,")
+    @test contains(str, "\e[91m\e[1m%52\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%53\e[22m\e[39m = ")
+    @test contains(str, "\e[91m\e[1m%52\e[22m\e[39m,")
 end
 
 @testset "issue #46947: IncrementalCompact double display of just-compacted nodes" begin

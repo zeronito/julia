@@ -37,7 +37,7 @@ function print_stmt(io::IO, idx::Int, @nospecialize(stmt), used::BitSet, maxleng
         idx_s = string(idx)
         pad = " "^(maxlength_idx - length(idx_s) + 1)
         if unstable_ssa != nothing && idx in unstable_ssa
-            printstyled(io, "%", idx_s, color = :red)
+            printstyled(io, "%", idx_s; color=:light_red, bold=true)
         else
             print(io, "%", idx_s)
         end

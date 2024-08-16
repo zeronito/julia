@@ -1,7 +1,7 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
 using Core.Compiler: has_typevar, userefs, scan_ssa_use!
-
+import Base: Base
 
 function show(io::IO, ::MIME"text/plain", u::UndefInitializer)
     show(io, u)
@@ -1819,7 +1819,7 @@ function show_unquoted(io::IO, val::SSAValue, ::Int, ::Int, unstable_ssa::Union{
         # invalid SSAValue, print this in red for better recognition
         printstyled(io, "%", val.id; color=:red)
     elseif unstable_ssa != nothing
-        printstyled(io, "%", val.id; color=(val.id in unstable_ssa) ? :red : :default)
+        printstyled(io, "%", val.id; color=(val.id in unstable_ssa) ? :light_red : :default, bold=val.id in unstable_ssa)
     else
         print(io, "%", val.id)
     end
