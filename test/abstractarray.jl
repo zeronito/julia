@@ -2154,3 +2154,7 @@ end
     @test one(Mat([1 2; 3 4])) == Mat([1 0; 0 1])
     @test one(Mat([1 2; 3 4])) isa Mat
 end
+
+@testset "reshape with Integer sizes" begin
+    @test reshape(1:4, big(2), big(2)) == reshape(1:4, 2, 2)
+end
