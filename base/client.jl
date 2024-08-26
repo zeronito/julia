@@ -601,7 +601,7 @@ The `@main` macro may be used standalone or as part of the function definition, 
 case, parentheses are required. In particular, the following are equivalent:
 
 ```
-function (@main)(args)
+function @main(args)
     println("Hello World")
 end
 ```
@@ -620,7 +620,7 @@ imported into `Main`, it will be treated as an entrypoint in `Main`:
 ```
 module MyApp
     export main
-    (@main)(args) = println("Hello World")
+    @main(args) = println("Hello World")
 end
 using .MyApp
 # `julia` Will execute MyApp.main at the conclusion of script execution
@@ -630,7 +630,7 @@ Note that in particular, the semantics do not attach to the method
 or the name:
 ```
 module MyApp
-    (@main)(args) = println("Hello World")
+    @main(args) = println("Hello World")
 end
 const main = MyApp.main
 # `julia` Will *NOT* execute MyApp.main unless there is a separate `@main` annotation in `Main`
@@ -640,9 +640,6 @@ const main = MyApp.main
     This macro is new in Julia 1.11. At present, the precise semantics of `@main` are still subject to change.
 """
 macro main(args...)
-    if !isempty(args)
-        error("`@main` is expected to be used as `(@main)` without macro arguments.")
-    end
     if isdefined(__module__, :main)
         if Base.binding_module(__module__, :main) !== __module__
             error("Symbol `main` is already a resolved import in module $(__module__). `@main` must be used in the defining module.")
@@ -653,5 +650,9 @@ macro main(args...)
         global main
         global var"#__main_is_entrypoint__#"::Bool = true
     end)
-    esc(:main)
+    if !isempty(args)
+        Expr(:call, esc(:main), map(esc, args)...)
+    else
+        esc(:main)
+    end
 end

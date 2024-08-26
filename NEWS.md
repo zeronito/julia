@@ -35,6 +35,9 @@ Language changes
    expression within a given `:toplevel` expression to make use of macros
    defined earlier in the same `:toplevel` expression. ([#53515])
 
+ - Macros in function-signature-position no longer require parentheses. E.g. `function @main(args) ... end` is now permitted,
+   whereas `function (@main)(args) ... end` was required in prior Julia versions.
+
 Compiler/Runtime improvements
 -----------------------------
 
