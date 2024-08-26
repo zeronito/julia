@@ -19,9 +19,33 @@ const heap_d = UInt32(8)
 const heaps = [Vector{taskheap}(undef, 0), Vector{taskheap}(undef, 0)]
 const heaps_lock = [SpinLock(), SpinLock()]
 
+cong(max::UInt32) = iszero(max) ? UInt32(0) : jl_rand_ptls(max) + UInt32(1)
 
-cong(max::UInt32) = iszero(max) ? UInt32(0) : ccall(:jl_rand_ptls, UInt32, (UInt32,), max) + UInt32(1)
+function jl_rand_ptls(max::UInt32)
+    ptls = Base.unsafe_convert(Ptr{UInt64}, Core.getptls())
+    rngseed = Base.unsafe_load(ptls, 2)
+    # one-extend unbias back to 64-bits
+    val, seed = _cong(UInt64(max), rngseed)
+    Base.unsafe_store!(ptls, seed, 2)
+    return val % UInt32
+end
 
+function _cong(max::UInt64, seed::UInt64)
+    if max == 0
+        return UInt64(0), seed
+    end
+    mask = typemax(UInt64)
+    max -= 1
+    mask >>= leading_zeros(max | 1)
+
+    local x::UInt64
+    while true
+        seed = UInt64(69069) * seed + UInt64(362437)
+        x = seed & mask
+        x > max || break
+    end
+    return x, seed
+end
 
 function multiq_sift_up(heap::taskheap, idx::Int32)
     while idx > Int32(1)
