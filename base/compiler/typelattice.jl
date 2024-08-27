@@ -73,14 +73,15 @@ struct Conditional
     slot::Int
     thentype
     elsetype
-    function Conditional(slot::Int, @nospecialize(thentype), @nospecialize(elsetype))
+    from_ssa::Int
+    function Conditional(slot::Int, @nospecialize(thentype), @nospecialize(elsetype), from_ssa::Int=1)
         assert_nested_slotwrapper(thentype)
         assert_nested_slotwrapper(elsetype)
-        return new(slot, thentype, elsetype)
+        return new(slot, thentype, elsetype, from_ssa)
     end
 end
-Conditional(var::SlotNumber, @nospecialize(thentype), @nospecialize(elsetype)) =
-    Conditional(slot_id(var), thentype, elsetype)
+Conditional(var::SlotNumber, @nospecialize(thentype), @nospecialize(elsetype), from_ssa::Int=1) =
+    Conditional(slot_id(var), thentype, elsetype, from_ssa)
 
 import Core: InterConditional
 """
@@ -100,7 +101,6 @@ InterConditional(var::SlotNumber, @nospecialize(thentype), @nospecialize(elsetyp
     InterConditional(slot_id(var), thentype, elsetype)
 
 const AnyConditional = Union{Conditional,InterConditional}
-Conditional(cnd::InterConditional) = Conditional(cnd.slot, cnd.thentype, cnd.elsetype)
 InterConditional(cnd::Conditional) = InterConditional(cnd.slot, cnd.thentype, cnd.elsetype)
 
 """
@@ -316,7 +316,8 @@ end
     return false
 end
 
-is_same_conditionals(a::C, b::C) where C<:AnyConditional = a.slot == b.slot
+is_same_conditionals(a::Conditional, b::Conditional) = a.slot == b.slot && a.from_ssa == b.from_ssa
+is_same_conditionals(a::InterConditional, b::InterConditional) = a.slot == b.slot
 
 @nospecializeinfer is_lattice_bool(lattice::AbstractLattice, @nospecialize(typ)) = typ !== Bottom && ⊑(lattice, typ, Bool)
 
@@ -377,7 +378,8 @@ end
         end
         return Conditional(slot,
             thenfields === nothing ? Bottom : PartialStruct(vartyp.typ, thenfields),
-            elsefields === nothing ? Bottom : PartialStruct(vartyp.typ, elsefields))
+            elsefields === nothing ? Bottom : PartialStruct(vartyp.typ, elsefields),
+            #=TODO from_ssa=#0)
     else
         vartyp_widened = widenconst(vartyp)
         thenfields = thentype === Bottom ? nothing : Any[]
@@ -394,7 +396,8 @@ end
         end
         return Conditional(slot,
             thenfields === nothing ? Bottom : PartialStruct(vartyp_widened, thenfields),
-            elsefields === nothing ? Bottom : PartialStruct(vartyp_widened, elsefields))
+            elsefields === nothing ? Bottom : PartialStruct(vartyp_widened, elsefields),
+            #=TODO from_ssa=#0)
     end
 end
 
@@ -743,15 +746,23 @@ end
 @nospecializeinfer @inline schanged(lattice::AbstractLattice, @nospecialize(n), @nospecialize(o)) =
     (n !== o) && (o === NOT_FOUND || (n !== NOT_FOUND && !(n.undef <= o.undef && ⊑(lattice, n.typ, o.typ))))
 
-# remove any lattice elements that wrap the reassigned slot object from the vartable
-function invalidate_slotwrapper(vt::VarState, changeid::Int, ignore_conditional::Bool)
-    newtyp = ignorelimited(vt.typ)
-    if (!ignore_conditional && isa(newtyp, Conditional) && newtyp.slot == changeid) ||
-       (isa(newtyp, MustAlias) && newtyp.slot == changeid)
-        newtyp = @noinline widenwrappedslotwrapper(vt.typ)
-        return VarState(newtyp, vt.undef)
+function should_invalidate(@nospecialize(typ), changeid::Int, ignore_conditional::Bool=false)
+    typ = ignorelimited(typ)
+    return ((!ignore_conditional && typ isa Conditional && typ.slot == changeid) ||
+            (typ isa MustAlias && typ.slot == changeid))
+end
+
+# remove any lattice elements that wrap the reassigned slot object within `state`
+function invalidate_slotwrapper!(state::VarTable, changeid::Int, ignore_conditional::Bool)
+    for idx = 1:length(state)
+        invalidate_slotwrapper!(state, idx, changeid, ignore_conditional)
     end
-    return nothing
+end
+function invalidate_slotwrapper!(state::VarTable, idx::Int, changeid::Int, ignore_conditional::Bool)
+    vt = state[idx]
+    if should_invalidate(vt.typ, changeid, ignore_conditional)
+        state[idx] = VarState(@noinline(widenwrappedslotwrapper(vt.typ)), vt.undef)
+    end
 end
 
 function stupdate!(lattice::AbstractLattice, state::VarTable, changes::VarTable)
@@ -776,13 +787,10 @@ end
 
 function stoverwrite1!(state::VarTable, change::StateUpdate)
     changeid = slot_id(change.var)
-    for i = 1:length(state)
-        invalidated = invalidate_slotwrapper(state[i], changeid, change.conditional)
-        if invalidated !== nothing
-            state[i] = invalidated
-        end
-    end
-    # and update the type of it
+    # widen any slot wrapper types that should be invalidated by this change
+    # (unless if this change is made from `Conditional`)
+    invalidate_slotwrapper!(state, changeid, #=ignore_conditional=#change.conditional)
+    # and update the type of the slot
     newtype = change.vtype
     state[changeid] = newtype
     return state
