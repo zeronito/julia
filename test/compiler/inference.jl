@@ -2289,20 +2289,20 @@ let 𝕃ᵢ = InferenceLattice(MustAliasesLattice(BaseInferenceLattice.instance)
     isa_tfunc(@nospecialize xs...) = Core.Compiler.isa_tfunc(𝕃ᵢ, xs...)
     ifelse_tfunc(@nospecialize xs...) = Core.Compiler.ifelse_tfunc(𝕃ᵢ, xs...)
 
-    @test (MustAlias(2, AliasableField{Any}, 1, Int) ⊑ Int)
-    @test !(Int ⊑ MustAlias(2, AliasableField{Any}, 1, Int))
-    @test (Int ⊑ MustAlias(2, AliasableField{Any}, 1, Any))
-    @test (Const(42) ⊑ MustAlias(2, AliasableField{Any}, 1, Int))
-    @test !(MustAlias(2, AliasableField{Any}, 1, Any) ⊑ Int)
-    @test tmerge(MustAlias(2, AliasableField{Any}, 1, Any), Const(nothing)) === Any
-    @test tmerge(MustAlias(2, AliasableField{Any}, 1, Int), Const(nothing)) === Union{Int,Nothing}
-    @test tmerge(Const(nothing), MustAlias(2, AliasableField{Any}, 1, Any)) === Any
-    @test tmerge(Const(nothing), MustAlias(2, AliasableField{Any}, 1, Int)) === Union{Int,Nothing}
-    @test isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Const(Bool)) === Const(true)
-    @test isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Type{Bool}) === Const(true)
-    @test isa_tfunc(MustAlias(2, AliasableField{Any}, 1, Int), Type{Bool}) === Const(false)
-    @test ifelse_tfunc(MustAlias(2, AliasableField{Any}, 1, Bool), Int, Int) === Int
-    @test ifelse_tfunc(MustAlias(2, AliasableField{Any}, 1, Int), Int, Int) === Union{}
+    @test (MustAlias(2, 0, AliasableField{Any}, 1, Int) ⊑ Int)
+    @test !(Int ⊑ MustAlias(2, 0, AliasableField{Any}, 1, Int))
+    @test (Int ⊑ MustAlias(2, 0, AliasableField{Any}, 1, Any))
+    @test (Const(42) ⊑ MustAlias(2, 0, AliasableField{Any}, 1, Int))
+    @test !(MustAlias(2, 0, AliasableField{Any}, 1, Any) ⊑ Int)
+    @test tmerge(MustAlias(2, 0, AliasableField{Any}, 1, Any), Const(nothing)) === Any
+    @test tmerge(MustAlias(2, 0, AliasableField{Any}, 1, Int), Const(nothing)) === Union{Int,Nothing}
+    @test tmerge(Const(nothing), MustAlias(2, 0, AliasableField{Any}, 1, Any)) === Any
+    @test tmerge(Const(nothing), MustAlias(2, 0, AliasableField{Any}, 1, Int)) === Union{Int,Nothing}
+    @test isa_tfunc(MustAlias(2, 0, AliasableField{Any}, 1, Bool), Const(Bool)) === Const(true)
+    @test isa_tfunc(MustAlias(2, 0, AliasableField{Any}, 1, Bool), Type{Bool}) === Const(true)
+    @test isa_tfunc(MustAlias(2, 0, AliasableField{Any}, 1, Int), Type{Bool}) === Const(false)
+    @test ifelse_tfunc(MustAlias(2, 0, AliasableField{Any}, 1, Bool), Int, Int) === Int
+    @test ifelse_tfunc(MustAlias(2, 0, AliasableField{Any}, 1, Int), Int, Int) === Union{}
 end
 
 maybeget_mustalias_tmerge(x::AliasableField) = x.f

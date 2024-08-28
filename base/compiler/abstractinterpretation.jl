@@ -392,7 +392,7 @@ function from_interprocedural!(interp::AbstractInterpreter, @nospecialize(rt), s
                                arginfo::ArgInfo, @nospecialize(maybecondinfo), vtypes::Union{VarTable,Nothing})
     rt = collect_limitations!(rt, sv)
     if isa(rt, InterMustAlias)
-        rt = from_intermustalias(typeinf_lattice(interp), rt, arginfo, sv)
+        rt = from_intermustalias(typeinf_lattice(interp), rt, arginfo, vtypes, sv)
     elseif is_lattice_bool(ipo_lattice(interp), rt)
         if maybecondinfo === nothing
             rt = widenconditional(rt)
@@ -412,7 +412,7 @@ function collect_limitations!(@nospecialize(typ), sv::InferenceState)
     return typ
 end
 
-function from_intermustalias(𝕃ᵢ::AbstractLattice, rt::InterMustAlias, arginfo::ArgInfo, sv::AbsIntState)
+function from_intermustalias(𝕃ᵢ::AbstractLattice, rt::InterMustAlias, arginfo::ArgInfo, vtypes::Union{VarTable,Nothing}, sv::AbsIntState)
     fargs = arginfo.fargs
     if fargs !== nothing && 1 ≤ rt.slot ≤ length(fargs)
         arg = ssa_def_slot(fargs[rt.slot], sv)
@@ -420,7 +420,9 @@ function from_intermustalias(𝕃ᵢ::AbstractLattice, rt::InterMustAlias, argin
             argtyp = widenslotwrapper(arginfo.argtypes[rt.slot])
             ⊑ = partialorder(𝕃ᵢ)
             if rt.vartyp ⊑ argtyp
-                return MustAlias(arg, rt.vartyp, rt.fldidx, rt.fldtyp)
+                @assert vtypes !== nothing
+                vtyp = vtypes[slot_id(arg)]
+                return MustAlias(arg, vtyp.ssadef, rt.vartyp, rt.fldidx, rt.fldtyp)
             else
                 # TODO optimize this case?
             end
@@ -1916,7 +1918,9 @@ function abstract_call_builtin(interp::AbstractInterpreter, f::Builtin, (; fargs
                     fldidx = maybe_const_fldidx(vartyp, a3.val)
                     if fldidx !== nothing
                         # wrap this aliasable field into `MustAlias` for possible constraint propagations
-                        return MustAlias(var, vartyp, fldidx, rt)
+                        @assert vtypes !== nothing
+                        vtyp = vtypes[slot_id(var)]
+                        return MustAlias(var, vtyp.ssadef, vartyp, fldidx, rt)
                     end
                 end
             end
@@ -3068,7 +3072,7 @@ end
 
 @nospecializeinfer function widenreturn(𝕃ᵢ::MustAliasesLattice, @nospecialize(rt), info::BestguessInfo)
     if isa(rt, MustAlias)
-        if 1 ≤ rt.slot ≤ info.nargs
+        if 1 ≤ rt.slot ≤ info.nargs && rt.ssadef == 0
             rt = InterMustAlias(rt)
         else
             rt = widenmustalias(rt)
@@ -3286,7 +3290,6 @@ end
 function init_vartable!(vartable::VarTable, frame::InferenceState)
     nargtypes = length(frame.result.argtypes)
     for i = 1:length(vartable)
-        # TODO: This should probably be `0`, not typemin(Int)
         vartable[i] = VarState(Bottom, #= ssadef =# typemin(Int), i > nargtypes)
     end
     return vartable
@@ -3612,8 +3615,7 @@ function apply_refinement!(𝕃ᵢ::AbstractLattice, slot::SlotNumber, @nospecia
 end
 
 function conditional_valid(condt::Conditional, currstate::VarTable)
-    # TODO: Remove typemin condition...
-    # @assert condt.ssadef != typemin(Int)
+    @assert condt.ssadef != typemin(Int)
     return currstate[condt.slot].ssadef == condt.ssadef
 end
 

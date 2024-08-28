@@ -136,19 +136,20 @@ N.B. currently this lattice element is only used in abstractinterpret, not in op
 """
 struct MustAlias
     slot::Int
+    ssadef::Int
     vartyp::Any
     fldidx::Int
     fldtyp::Any
-    function MustAlias(slot::Int, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp))
+    function MustAlias(slot::Int, ssadef::Int, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp))
         assert_nested_slotwrapper(vartyp)
         assert_nested_slotwrapper(fldtyp)
         # @assert !isalreadyconst(vartyp) "vartyp is already const"
         # @assert !isalreadyconst(fldtyp) "fldtyp is already const"
-        return new(slot, vartyp, fldidx, fldtyp)
+        return new(slot, ssadef, vartyp, fldidx, fldtyp)
     end
 end
-MustAlias(var::SlotNumber, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp)) =
-    MustAlias(slot_id(var), vartyp, fldidx, fldtyp)
+MustAlias(var::SlotNumber, ssadef::Int, @nospecialize(vartyp), fldidx::Int, @nospecialize(fldtyp)) =
+    MustAlias(slot_id(var), ssadef, vartyp, fldidx, fldtyp)
 
 """
     alias::InterMustAlias
@@ -172,8 +173,10 @@ InterMustAlias(var::SlotNumber, @nospecialize(vartyp), fldidx::Int, @nospecializ
     InterMustAlias(slot_id(var), vartyp, fldidx, fldtyp)
 
 const AnyMustAlias = Union{MustAlias,InterMustAlias}
-MustAlias(alias::InterMustAlias) = MustAlias(alias.slot, alias.vartyp, alias.fldidx, alias.fldtyp)
-InterMustAlias(alias::MustAlias) = InterMustAlias(alias.slot, alias.vartyp, alias.fldidx, alias.fldtyp)
+function InterMustAlias(alias::MustAlias)
+    @assert alias.ssadef == 0
+    InterMustAlias(alias.slot, alias.vartyp, alias.fldidx, alias.fldtyp)
+end
 
 struct PartialTypeVar
     tv::TypeVar
@@ -392,7 +395,7 @@ end
 end
 
 @nospecializeinfer function form_mustalias_conditional(alias::MustAlias, @nospecialize(thentype), @nospecialize(elsetype))
-    (; slot, vartyp, fldidx) = alias
+    (; slot, ssadef, vartyp, fldidx) = alias
     if isa(vartyp, PartialStruct)
         fields = vartyp.fields
         thenfields = thentype === Bottom ? nothing : copy(fields)
@@ -403,7 +406,7 @@ end
                 elsefields === nothing || (elsefields[i] = elsetype)
             end
         end
-        return Conditional(slot, typemin(Int), # TODO
+        return Conditional(slot, ssadef,
             thenfields === nothing ? Bottom : PartialStruct(vartyp.typ, thenfields),
             elsefields === nothing ? Bottom : PartialStruct(vartyp.typ, elsefields))
     else
@@ -420,7 +423,7 @@ end
                 elsefields === nothing || push!(elsefields, t)
             end
         end
-        return Conditional(slot, typemin(Int),
+        return Conditional(slot, ssadef,
             thenfields === nothing ? Bottom : PartialStruct(vartyp_widened, thenfields),
             elsefields === nothing ? Bottom : PartialStruct(vartyp_widened, elsefields))
     end
