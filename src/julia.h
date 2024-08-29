@@ -2511,6 +2511,11 @@ JL_DLLEXPORT int jl_generating_output(void) JL_NOTSAFEPOINT;
 #define JL_OPTIONS_USE_PKGIMAGES_YES 1
 #define JL_OPTIONS_USE_PKGIMAGES_NO 0
 
+#define JL_TRIM_NO 0
+#define JL_TRIM_SAFE 1
+#define JL_TRIM_UNSAFE 2
+#define JL_TRIM_UNSAFE_WARN 3
+
 // Version information
 #include <julia_version.h> // Generated file
 
@@ -2558,10 +2563,12 @@ typedef struct {
     int gcstack_arg; // Pass the ptls value as an argument with swiftself
 
     int use_jlplt; // Whether to use the Julia PLT mechanism or emit symbols directly
+    int trim; // can we emit dynamic dispatches?
     // Cache access. Default: jl_rettype_inferred_native.
     jl_codeinstance_lookup_t lookup;
 } jl_cgparams_t;
 extern JL_DLLEXPORT int jl_default_debug_info_kind;
+extern JL_DLLEXPORT jl_cgparams_t jl_default_cgparams;
 
 typedef struct {
     int emit_metadata;
