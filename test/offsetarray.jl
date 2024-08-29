@@ -918,3 +918,10 @@ end
     @test parent(B) === A0
     @test axes(B) == Base.IdentityUnitRange.((-10:-9, 9:10))
 end
+
+@testset "mapreduce with OffsetRanges" begin
+    r = 5:100
+    a = OffsetArray(r, 2)
+    b = sum(a, dims=1)
+    @test b[begin] == sum(r)
+end
