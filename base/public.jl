@@ -87,6 +87,7 @@ public
     @constprop,
     @locals,
     @propagate_inbounds,
+    @with,
 
 # External processes
     shell_escape,
@@ -109,6 +110,10 @@ public
     # functions
     reseteof,
     link_pipe!,
+
+# Scoped values
+    ScopedValue,
+    with,
 
 # misc
     notnothing,
