@@ -22,11 +22,7 @@
 #include <llvm/CodeGen/TargetSubtargetInfo.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Target/TargetOptions.h>
-#if JL_LLVM_VERSION >= 170000
 #include <llvm/TargetParser/Host.h>
-#else
-#include <llvm/ADT/Host.h>
-#endif
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Object/SymbolSize.h>
 
@@ -635,11 +631,7 @@ static AttributeList get_func_attrs(LLVMContext &C)
 static AttributeList get_donotdelete_func_attrs(LLVMContext &C)
 {
     AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
     FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
-#else
-    FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
-#endif
     FnAttrs.addAttribute(Attribute::WillReturn);
     FnAttrs.addAttribute(Attribute::NoUnwind);
     return AttributeList::get(C,
@@ -669,11 +661,7 @@ static AttributeList get_attrs_box_float(LLVMContext &C, unsigned nbytes)
     auto FnAttrs = AttrBuilder(C);
     FnAttrs.addAttribute(Attribute::WillReturn);
     FnAttrs.addAttribute(Attribute::NoUnwind);
-#if JL_LLVM_VERSION >= 160000
     FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
-#else
-    FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
-#endif
     auto RetAttrs = AttrBuilder(C);
     RetAttrs.addAttribute(Attribute::NonNull);
     RetAttrs.addDereferenceableAttr(nbytes);
@@ -689,11 +677,7 @@ static AttributeList get_attrs_box_sext(LLVMContext &C, unsigned nbytes)
     auto FnAttrs = AttrBuilder(C);
     FnAttrs.addAttribute(Attribute::WillReturn);
     FnAttrs.addAttribute(Attribute::NoUnwind);
-#if JL_LLVM_VERSION >= 160000
     FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
-#else
-    FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
-#endif
     auto RetAttrs = AttrBuilder(C);
     RetAttrs.addAttribute(Attribute::NonNull);
     RetAttrs.addAttribute(Attribute::getWithDereferenceableBytes(C, nbytes));
@@ -710,11 +694,7 @@ static AttributeList get_attrs_box_zext(LLVMContext &C, unsigned nbytes)
     auto FnAttrs = AttrBuilder(C);
     FnAttrs.addAttribute(Attribute::WillReturn);
     FnAttrs.addAttribute(Attribute::NoUnwind);
-#if JL_LLVM_VERSION >= 160000
     FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
-#else
-    FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
-#endif
     auto RetAttrs = AttrBuilder(C);
     RetAttrs.addAttribute(Attribute::NonNull);
     RetAttrs.addDereferenceableAttr(nbytes);
@@ -1134,12 +1114,7 @@ static const auto jlegalx_func = new JuliaFunction<TypeFnContextAndSizeT>{
         return FunctionType::get(getInt32Ty(C), {T, T, T_size}, false); },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleOrArgMemOnly());
-#else
-        FnAttrs.addAttribute(Attribute::ReadOnly);
-        FnAttrs.addAttribute(Attribute::ArgMemOnly);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         return AttributeList::get(C,
                 AttributeSet::get(C, FnAttrs),
@@ -1159,9 +1134,7 @@ static const auto jl_alloc_obj_func = new JuliaFunction<TypeFnContextAndSizeT>{
         auto FnAttrs = AttrBuilder(C);
         FnAttrs.addAllocSizeAttr(1, None); // returns %1 bytes
         FnAttrs.addAllocKindAttr(AllocFnKind::Alloc);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::argMemOnly(ModRefInfo::Ref) | MemoryEffects::inaccessibleMemOnly(ModRefInfo::ModRef));
-#endif
         FnAttrs.addAttribute(Attribute::WillReturn);
         FnAttrs.addAttribute(Attribute::NoUnwind);
         auto RetAttrs = AttrBuilder(C);
@@ -1197,11 +1170,7 @@ static const auto jl_typeof_func = new JuliaFunction<>{
     },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::none());
-#else
-        FnAttrs.addAttribute(Attribute::ReadNone);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         FnAttrs.addAttribute(Attribute::NoRecurse);
         return AttributeList::get(C,
@@ -1216,11 +1185,7 @@ static const auto jl_write_barrier_func = new JuliaFunction<>{
             {JuliaType::get_prjlvalue_ty(C)}, true); },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly());
-#else
-        FnAttrs.addAttribute(Attribute::InaccessibleMemOnly);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         FnAttrs.addAttribute(Attribute::NoRecurse);
         return AttributeList::get(C,
@@ -1293,12 +1258,7 @@ static const auto memcmp_func = new JuliaFunction<TypeFnContextAndSizeT>{
             {getPointerTy(C), getPointerTy(C), T_size}, false); },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::argMemOnly(ModRefInfo::Ref));
-#else
-        FnAttrs.addAttribute(Attribute::ArgMemOnly);
-        FnAttrs.addAttribute(Attribute::ReadOnly);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         return AttributeList::get(C,
             AttributeSet::get(C, FnAttrs),
@@ -1348,11 +1308,7 @@ static const auto jlfieldindex_func = new JuliaFunction<>{
     },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::readOnly());
-#else
-        FnAttrs.addAttribute(Attribute::ReadOnly);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         FnAttrs.addAttribute(Attribute::WillReturn);
         return AttributeList::get(C,
@@ -1418,9 +1374,7 @@ static const auto jl_allocgenericmemory = new JuliaFunction<TypeFnContextAndSize
         [](LLVMContext &C) {
             AttrBuilder FnAttrs(C);
             AttrBuilder RetAttrs(C);
-#if JL_LLVM_VERSION >= 160000
             FnAttrs.addMemoryAttr(MemoryEffects::inaccessibleMemOnly(ModRefInfo::ModRef) | MemoryEffects::argMemOnly(ModRefInfo::Ref));
-#endif
             FnAttrs.addAttribute(Attribute::WillReturn);
             RetAttrs.addAlignmentAttr(Align(16));
             RetAttrs.addAttribute(Attribute::NonNull);
@@ -1510,11 +1464,7 @@ static const auto pointer_from_objref_func = new JuliaFunction<>{
             {PointerType::get(JuliaType::get_jlvalue_ty(C), AddressSpace::Derived)}, false); },
     [](LLVMContext &C) {
         AttrBuilder FnAttrs(C);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::none());
-#else
-        FnAttrs.addAttribute(Attribute::ReadNone);
-#endif
         FnAttrs.addAttribute(Attribute::NoUnwind);
         return AttributeList::get(C,
             AttributeSet::get(C, FnAttrs),
@@ -1537,11 +1487,7 @@ static const auto gc_loaded_func = new JuliaFunction<>{
         FnAttrs.addAttribute(Attribute::Speculatable);
         FnAttrs.addAttribute(Attribute::WillReturn);
         FnAttrs.addAttribute(Attribute::NoRecurse);
-#if JL_LLVM_VERSION >= 160000
         FnAttrs.addMemoryAttr(MemoryEffects::none());
-#else
-        FnAttrs.addAttribute(Attribute::ReadNone);
-#endif
         AttrBuilder RetAttrs(C);
         RetAttrs.addAttribute(Attribute::NonNull);
         RetAttrs.addAttribute(Attribute::NoUndef);
@@ -2239,11 +2185,7 @@ static Value *emit_inttoptr(jl_codectx_t &ctx, Value *v, Type *ty)
         auto ptr = I->getOperand(0);
         if (ty->getPointerAddressSpace() == ptr->getType()->getPointerAddressSpace())
             return ptr;
-        #if JL_LLVM_VERSION >= 170000
         else
-        #else
-        else if (cast<PointerType>(ty)->hasSameElementTypeAs(cast<PointerType>(ptr->getType())))
-        #endif
             return ctx.builder.CreateAddrSpaceCast(ptr, ty);
     }
     ++EmittedIntToPtrs;
@@ -5029,9 +4971,6 @@ static jl_cgval_t emit_call_specfun_other(jl_codectx_t &ctx, bool is_opaque_clos
         break;
     case jl_returninfo_t::SRet:
         result = emit_static_alloca(ctx, getAttributeAtIndex(returninfo.attrs, 1, Attribute::StructRet).getValueAsType());
-        #if JL_LLVM_VERSION < 170000
-        assert(cast<PointerType>(result->getType())->hasSameElementTypeAs(cast<PointerType>(cft->getParamType(0))));
-        #endif
         argvals[idx] = result;
         idx++;
         break;
@@ -7324,15 +7263,9 @@ static Function* gen_cfun_wrapper(
                 if (jlfunc_sret) {
                     result = emit_static_alloca(ctx, getAttributeAtIndex(returninfo.attrs, 1, Attribute::StructRet).getValueAsType());
                     setName(ctx.emission_context, result, "sret");
-                    #if JL_LLVM_VERSION < 170000
-                    assert(cast<PointerType>(result->getType())->hasSameElementTypeAs(cast<PointerType>(cft->getParamType(0))));
-                    #endif
                 } else {
                     result = emit_static_alloca(ctx, get_unionbytes_type(ctx.builder.getContext(), returninfo.union_bytes));
                     setName(ctx.emission_context, result, "result_union");
-                    #if JL_LLVM_VERSION < 170000
-                    assert(cast<PointerType>(result->getType())->hasSameElementTypeAs(cast<PointerType>(cft->getParamType(0))));
-                    #endif
                 }
             }
             args.push_back(result);
@@ -7391,9 +7324,6 @@ static Function* gen_cfun_wrapper(
             theFptr = ctx.builder.CreateSelect(age_ok, theFptr, gf_thunk);
         }
 
-        #if JL_LLVM_VERSION < 170000
-        assert(cast<PointerType>(theFptr->getType())->isOpaqueOrPointeeTypeMatches(returninfo.decl.getFunctionType()));
-        #endif
         CallInst *call = ctx.builder.CreateCall(
             returninfo.decl.getFunctionType(),
             theFptr, ArrayRef<Value*>(args));
@@ -7769,9 +7699,6 @@ static Function *gen_invoke_wrapper(jl_method_instance_t *lam, jl_value_t *jlret
     case jl_returninfo_t::Ghosts:
         break;
     case jl_returninfo_t::SRet:
-        #if JL_LLVM_VERSION < 170000
-        assert(cast<PointerType>(ftype->getParamType(0))->isOpaqueOrPointeeTypeMatches(getAttributeAtIndex(f.attrs, 1, Attribute::StructRet).getValueAsType()));
-        #endif
         result = ctx.builder.CreateAlloca(getAttributeAtIndex(f.attrs, 1, Attribute::StructRet).getValueAsType());
         setName(ctx.emission_context, result, "sret");
         args[idx] = result;
@@ -10170,10 +10097,6 @@ char jl_using_perf_jitevents = 0;
 
 int jl_is_timing_passes = 0;
 
-#if JL_LLVM_VERSION < 170000
-int jl_opaque_ptrs_set = 0;
-#endif
-
 extern "C" void jl_init_llvm(void)
 {
     jl_page_size = jl_getpagesize();
@@ -10192,12 +10115,8 @@ extern "C" void jl_init_llvm(void)
     initializeAnalysis(Registry);
     initializeTransformUtils(Registry);
     initializeInstCombine(Registry);
-#if JL_LLVM_VERSION >= 160000
-    // TODO
-#else
-    initializeAggressiveInstCombine(Registry);
-    initializeInstrumentation(Registry);
-#endif
+    // TODO: initializeAggressiveInstCombine(Registry);
+    // TODO: initializeInstrumentation(Registry);
     initializeTarget(Registry);
 #ifdef USE_POLLY
     polly::initializePollyPasses(Registry);
@@ -10222,17 +10141,6 @@ extern "C" void jl_init_llvm(void)
     clopt = llvmopts.lookup("combiner-store-merge-dependence-limit");
     if (clopt && clopt->getNumOccurrences() == 0)
         cl::ProvidePositionalOption(clopt, "4", 1);
-
-    #if JL_LLVM_VERSION < 170000
-    // we want the opaque-pointers to be opt-in, per LLVMContext, for this release
-    // so change the default value back to pre-14.x, without changing the NumOccurrences flag for it
-    clopt = llvmopts.lookup("opaque-pointers");
-    if (clopt && clopt->getNumOccurrences() == 0) {
-        clopt->addOccurrence(1, clopt->ArgStr, "false", true);
-    } else {
-        jl_opaque_ptrs_set = 1;
-    }
-    #endif
 
     clopt = llvmopts.lookup("time-passes");
     if (clopt && clopt->getNumOccurrences() > 0)
