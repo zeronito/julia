@@ -616,13 +616,7 @@ Logan
 """
 readline(filename::AbstractString; keep::Bool=false) =
     open(io -> readline(io; keep), filename)
-<<<<<<< HEAD
-readline(s::IO=stdin; keep::Bool=false) = unsafe_takestring!(copyline(IOBuffer(sizehint=16), s; keep))
-||||||| parent of 8a7667fc90 (Use unsafe version of takestring more rarely)
-readline(s::IO=stdin; keep::Bool=false) = unsafe_takestring!(copyline(IOBuffer(sizehint=70), s; keep))
-=======
-readline(s::IO=stdin; keep::Bool=false) = takestring!(copyline(IOBuffer(sizehint=70), s; keep))
->>>>>>> 8a7667fc90 (Use unsafe version of takestring more rarely)
+readline(s::IO=stdin; keep::Bool=false) = takestring!(copyline(IOBuffer(sizehint=16), s; keep))
 
 """
     copyline(out::IO, io::IO=stdin; keep::Bool=false)
