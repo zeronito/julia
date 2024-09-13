@@ -8,7 +8,7 @@ See [`CRC32c.crc32c`](@ref) for more information.
 module CRC32c
 
 import Base.FastContiguousSubArray
-import Base: DenseBytes
+import Base: DenseUInt8OrInt8
 
 export crc32c
 
@@ -36,7 +36,7 @@ but note that the result may be endian-dependent.
 function crc32c end
 
 
-function crc32c(a::DenseBytes, crc::UInt32=0x00000000)
+function crc32c(a::DenseUInt8OrInt8, crc::UInt32=0x00000000)
     Base._crc32c(a, crc)
 end
 
