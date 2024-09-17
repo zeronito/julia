@@ -407,9 +407,11 @@ let e = Base.Event(true),
     onces = Vector{Vector{Nothing}}(undef, length(tids))
     for i = 1:length(tids)
         function cl()
+            GC.gc(false) # stress test the GC-safepoint mechanics of jl_adopt_thread
             local y = once()
             onces[i] = y
             @test x !== y === once()
+            GC.gc(false) # stress test the GC-safepoint mechanics of jl_delete_thread
             nothing
         end
         function threadcallclosure(cl::F) where {F} # create sparam so we can reference the type of cl in the ccall type
