@@ -2756,7 +2756,7 @@ static void jl_name_jlfuncparams_args(jl_codegen_params_t &params, Function *F) 
     F->getArg(3)->setName("sparams::Any");
 }
 
-static void jl_init_function(Function *F, const Triple &TT)
+void jl_init_function(Function *F, const Triple &TT)
 {
     // set any attributes that *must* be set on all functions
     AttrBuilder attr(F->getContext());
@@ -6803,7 +6803,7 @@ static Value *get_scope_field(jl_codectx_t &ctx)
     return emit_ptrgep(ctx, ct, offsetof(jl_task_t, scope), "current_scope");
 }
 
-static Function *emit_tojlinvoke(jl_code_instance_t *codeinst, StringRef theFptrName, Module *M, jl_codegen_params_t &params)
+Function *emit_tojlinvoke(jl_code_instance_t *codeinst, StringRef theFptrName, Module *M, jl_codegen_params_t &params) JL_NOTSAFEPOINT
 {
     ++EmittedToJLInvokes;
     jl_codectx_t ctx(M->getContext(), params, codeinst);
@@ -6949,7 +6949,7 @@ static void emit_cfunc_invalidate(
     }
 }
 
-static void emit_cfunc_invalidate(
+void emit_cfunc_invalidate(
         Function *gf_thunk, jl_returninfo_t::CallingConv cc, unsigned return_roots,
         jl_value_t *calltype, jl_value_t *rettype, bool is_for_opaque_closure,
         size_t nargs, jl_codegen_params_t &params,

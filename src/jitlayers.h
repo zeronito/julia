@@ -184,8 +184,7 @@ struct jl_codegen_call_target_t {
 };
 
 typedef SmallVector<std::pair<jl_code_instance_t*, jl_codegen_call_target_t>, 0> jl_workqueue_t;
-// TODO DenseMap?
-typedef std::map<jl_code_instance_t*, std::pair<orc::ThreadSafeModule, jl_llvm_functions_t>> jl_compiled_functions_t;
+
 
 struct jl_codegen_params_t {
     orc::ThreadSafeContext tsctx;
@@ -199,7 +198,6 @@ struct jl_codegen_params_t {
     typedef StringMap<GlobalVariable*> SymMapGV;
     // outputs
     jl_workqueue_t workqueue;
-    jl_compiled_functions_t compiled_functions;
     std::map<void*, GlobalVariable*> global_targets;
     std::map<std::tuple<jl_code_instance_t*,bool>, GlobalVariable*> external_fns;
     std::map<jl_datatype_t*, DIType*> ditypes;
@@ -258,6 +256,14 @@ void jl_compile_workqueue(
 
 Function *jl_cfunction_object(jl_function_t *f, jl_value_t *rt, jl_tupletype_t *argt,
     jl_codegen_params_t &params);
+
+Function *emit_tojlinvoke(jl_code_instance_t *codeinst, StringRef theFptrName, Module *M, jl_codegen_params_t &params) JL_NOTSAFEPOINT;
+void emit_cfunc_invalidate(
+        Function *gf_thunk, jl_returninfo_t::CallingConv cc, unsigned return_roots,
+        jl_value_t *calltype, jl_value_t *rettype, bool is_for_opaque_closure,
+        size_t nargs, jl_codegen_params_t &params,
+        size_t min_world, size_t max_world) JL_NOTSAFEPOINT;
+void jl_init_function(Function *F, const Triple &TT) JL_NOTSAFEPOINT;
 
 void add_named_global(StringRef name, void *addr) JL_NOTSAFEPOINT;
 
