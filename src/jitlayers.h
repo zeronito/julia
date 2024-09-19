@@ -261,7 +261,9 @@ Function *emit_tojlinvoke(jl_code_instance_t *codeinst, StringRef theFptrName, M
 void emit_cfunc_invalidate(
         Function *gf_thunk, jl_returninfo_t::CallingConv cc, unsigned return_roots,
         jl_value_t *calltype, jl_value_t *rettype, bool is_for_opaque_closure,
-        size_t nargs, jl_codegen_params_t &params,
+        size_t nargs,
+        jl_codegen_params_t &params,
+        Function *target,
         size_t min_world, size_t max_world) JL_NOTSAFEPOINT;
 void jl_init_function(Function *F, const Triple &TT) JL_NOTSAFEPOINT;
 
