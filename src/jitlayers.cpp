@@ -237,12 +237,13 @@ static void finish_params(orc::ThreadSafeModule &TSM, jl_codegen_params_t &param
   // locks and barriers for this state
 static std::mutex engine_lock;
 static std::condition_variable engine_wait;
-static int threads_in_compiler_phase1;
-static int threads_in_compiler_phase2;
+static int threads_in_compiler_phase;
   // the TSM for each codeinst
 static DenseMap<jl_code_instance_t*, orc::ThreadSafeModule> emittedmodules;
   // the invoke and specsig function names in the JIT
 static DenseMap<jl_code_instance_t*, jl_llvm_functions_t> invokenames;
+  // everything that any thread has compiled recently
+static SmallVector<jl_code_instance_t*,0> compiled_functions;
   // everything that any thread wants to compile right now
 static DenseSet<jl_code_instance_t*> compileready;
   // a map from a codeinst to the outgoing edges needed before linking it
@@ -251,7 +252,8 @@ static DenseMap<jl_code_instance_t*, SmallVector<jl_code_instance_t*,0>> complet
   // really need this once JITLink is available everywhere, since every module
   // is automatically complete, and we can emit any required fixups later as a
   // separate module)
-static DenseMap<jl_code_instance_t*, std::pair<jl_codegen_params_t, int>> incompletemodules;
+typedef std::shared_ptr<JuliaOJIT::ContextPoolT::OwningResource> TSMSharedContext;
+static DenseMap<jl_code_instance_t*, std::tuple<TSMSharedContext, jl_codegen_params_t, int>> incompletemodules;
   // the set of incoming unresolved edges resolved by a codeinstance
 static DenseMap<jl_code_instance_t*, SmallVector<jl_code_instance_t*,0>> incomplete_rgraph;
 
@@ -349,10 +351,8 @@ static int jl_analyze_workqueue(jl_code_instance_t *callee, jl_codegen_params_t 
 
 // move codeinst (and deps) from incompletemodules to emitted modules
 // and populate compileready from complete_graph
-static bool prepare_compile(jl_code_instance_t *codeinst) JL_NOTSAFEPOINT
+static void prepare_compile(jl_code_instance_t *codeinst) JL_NOTSAFEPOINT
 {
-    if (!invokenames.count(codeinst))
-        return false;
     SmallVector<jl_code_instance_t*> workqueue;
     workqueue.push_back(codeinst);
     while (!workqueue.empty()) {
@@ -379,11 +379,13 @@ static bool prepare_compile(jl_code_instance_t *codeinst) JL_NOTSAFEPOINT
                 return !invokenames.count(edge);
             });
             edges.erase(edges_end, edges.end());
-            assert(waiting == it->second.second);
-            it->second.second = 0;
-            waiting = jl_analyze_workqueue(codeinst, it->second.first, true);
+            assert(waiting == std::get<2>(it->second));
+            std::get<2>(it->second) = 0;
+            auto &params = std::get<1>(it->second);
+            params.tsctx_lock = params.tsctx.getLock();
+            waiting = jl_analyze_workqueue(codeinst, params, true);
             assert(!waiting); (void)waiting;
-            finish_params(emittedmodules[codeinst], it->second.first);
+            finish_params(emittedmodules[codeinst], params);
             incompletemodules.erase(it);
         }
         // and then indicate this should be compiled now
@@ -394,7 +396,6 @@ static bool prepare_compile(jl_code_instance_t *codeinst) JL_NOTSAFEPOINT
             }
         }
     }
-    return true;
 }
 
 // notify any other pending work that this edge now has code defined
@@ -406,13 +407,15 @@ static void complete_emit(jl_code_instance_t *edge) JL_NOTSAFEPOINT
     auto redges = std::move(notify->second);
     incomplete_rgraph.erase(notify);
     for (auto &callee : redges) {
-        auto node = incompletemodules.find(callee);
-        assert(node != incompletemodules.end());
-        if (--node->second.second == 0) {
-            int waiting = jl_analyze_workqueue(node->first, node->second.first);
+        auto it = incompletemodules.find(callee);
+        assert(it != incompletemodules.end());
+        if (--std::get<2>(it->second) == 0) {
+            auto &params = std::get<1>(it->second);
+            params.tsctx_lock = params.tsctx.getLock();
+            int waiting = jl_analyze_workqueue(it->first, params);
             assert(!waiting); (void)waiting;
-            finish_params(emittedmodules[node->first], node->second.first);
-            incompletemodules.erase(node);
+            finish_params(emittedmodules[it->first], params);
+            incompletemodules.erase(it);
         }
     }
 }
@@ -422,94 +425,91 @@ static void complete_emit(jl_code_instance_t *edge) JL_NOTSAFEPOINT
 static void jl_compile_codeinst_now(jl_code_instance_t *codeinst) JL_NOTSAFEPOINT
 {
     std::unique_lock<std::mutex> lock(engine_lock);
-    if (!prepare_compile(codeinst))
+    if (!invokenames.count(codeinst))
         return;
-    std::vector<jl_code_instance_t*> compiled_functions;
-    threads_in_compiler_phase1++;
-    threads_in_compiler_phase2++;
+    threads_in_compiler_phase++;
+    prepare_compile(codeinst);
     while (!compileready.empty()) {
         auto compilenext = compileready.begin();
         compiled_functions.push_back(*compilenext);
         auto TSMref = emittedmodules.find(*compilenext);
-        if (TSMref != emittedmodules.end()) {
-            auto TSM = std::move(TSMref->second);
-            emittedmodules.erase(TSMref);
-            compileready.erase(compilenext);
-            lock.unlock();
-            jl_ExecutionEngine->addModule(std::move(TSM));
-            lock.lock();
-        }
+        compileready.erase(compilenext);
+        assert(TSMref != emittedmodules.end());
+        auto TSM = std::move(TSMref->second);
+        emittedmodules.erase(TSMref);
+        lock.unlock();
+        jl_ExecutionEngine->addModule(std::move(TSM));
+        lock.lock();
     }
     // barrier until all threads have finished calling addModule
-    if (--threads_in_compiler_phase1 == 0)
+    if (--threads_in_compiler_phase == 0) {
+        // the last thread out will finish linking everything
+        // then release all of the other threads
+        // move the function pointers out from invokenames to the codeinst
+        for (auto &this_code : compiled_functions) {
+            auto it = invokenames.find(this_code);
+            assert(it != invokenames.end());
+            jl_llvm_functions_t &decls = it->second;
+            jl_callptr_t addr;
+            bool isspecsig = false;
+            if (decls.functionObject == "jl_fptr_args") {
+                addr = jl_fptr_args_addr;
+            }
+            else if (decls.functionObject == "jl_fptr_sparam") {
+                addr = jl_fptr_sparam_addr;
+            }
+            else if (decls.functionObject == "jl_f_opaque_closure_call") {
+                addr = jl_f_opaque_closure_call_addr;
+            }
+            else {
+                addr = (jl_callptr_t)getAddressForFunction(decls.functionObject);
+                isspecsig = true;
+            }
+            if (!decls.specFunctionObject.empty()) {
+                void *prev_specptr = nullptr;
+                auto spec = (void*)getAddressForFunction(decls.specFunctionObject);
+                if (jl_atomic_cmpswap_acqrel(&this_code->specptr.fptr, &prev_specptr, spec)) {
+                    // only set specsig and invoke if we were the first to set specptr
+                    jl_atomic_store_relaxed(&this_code->specsigflags, (uint8_t) isspecsig);
+                    // we might overwrite invokeptr here; that's ok, anybody who relied on the identity of invokeptr
+                    // either assumes that specptr was null, doesn't care about specptr,
+                    // or will wait until specsigflags has 0b10 set before reloading invoke
+                    jl_atomic_store_release(&this_code->invoke, addr);
+                    jl_atomic_store_release(&this_code->specsigflags, (uint8_t) (0b10 | isspecsig));
+                } else {
+                    //someone else beat us, don't commit any results
+                    while (!(jl_atomic_load_acquire(&this_code->specsigflags) & 0b10)) {
+                        jl_cpu_pause();
+                    }
+                    addr = jl_atomic_load_relaxed(&this_code->invoke);
+                }
+            }
+            else {
+                jl_callptr_t prev_invoke = nullptr;
+                // Allow replacing addr if it is either nullptr or our special waiting placeholder.
+                if (!jl_atomic_cmpswap_acqrel(&this_code->invoke, &prev_invoke, addr)) {
+                    if (prev_invoke == jl_fptr_wait_for_compiled_addr && !jl_atomic_cmpswap_acqrel(&this_code->invoke, &prev_invoke, addr)) {
+                        addr = prev_invoke;
+                        //TODO do we want to potentially promote invoke anyways? (e.g. invoke is jl_interpret_call or some other
+                        //known lesser function)
+                    }
+                }
+            }
+            invokenames.erase(it);
+            complete_graph.erase(this_code);
+        }
+        compiled_functions.clear();
         engine_wait.notify_all();
-    else while (threads_in_compiler_phase1)
-        engine_wait.wait(lock);
-    // move the function pointers out from invokenames to the codeinst
-    for (auto &this_code : compiled_functions) {
-        auto it = invokenames.find(this_code);
-        assert(it != invokenames.end());
-        jl_llvm_functions_t &decls = it->second;
-        jl_callptr_t addr;
-        bool isspecsig = false;
-        if (decls.functionObject == "jl_fptr_args") {
-            addr = jl_fptr_args_addr;
-        }
-        else if (decls.functionObject == "jl_fptr_sparam") {
-            addr = jl_fptr_sparam_addr;
-        }
-        else if (decls.functionObject == "jl_f_opaque_closure_call") {
-            addr = jl_f_opaque_closure_call_addr;
-        }
-        else {
-            addr = (jl_callptr_t)getAddressForFunction(decls.functionObject);
-            isspecsig = true;
-        }
-        if (!decls.specFunctionObject.empty()) {
-            void *prev_specptr = nullptr;
-            auto spec = (void*)getAddressForFunction(decls.specFunctionObject);
-            if (jl_atomic_cmpswap_acqrel(&this_code->specptr.fptr, &prev_specptr, spec)) {
-                // only set specsig and invoke if we were the first to set specptr
-                jl_atomic_store_relaxed(&this_code->specsigflags, (uint8_t) isspecsig);
-                // we might overwrite invokeptr here; that's ok, anybody who relied on the identity of invokeptr
-                // either assumes that specptr was null, doesn't care about specptr,
-                // or will wait until specsigflags has 0b10 set before reloading invoke
-                jl_atomic_store_release(&this_code->invoke, addr);
-                jl_atomic_store_release(&this_code->specsigflags, (uint8_t) (0b10 | isspecsig));
-            } else {
-                //someone else beat us, don't commit any results
-                while (!(jl_atomic_load_acquire(&this_code->specsigflags) & 0b10)) {
-                    jl_cpu_pause();
-                }
-                addr = jl_atomic_load_relaxed(&this_code->invoke);
-            }
-        }
-        else {
-            jl_callptr_t prev_invoke = nullptr;
-            // Allow replacing addr if it is either nullptr or our special waiting placeholder.
-            if (!jl_atomic_cmpswap_acqrel(&this_code->invoke, &prev_invoke, addr)) {
-                if (prev_invoke == jl_fptr_wait_for_compiled_addr && !jl_atomic_cmpswap_acqrel(&this_code->invoke, &prev_invoke, addr)) {
-                    addr = prev_invoke;
-                    //TODO do we want to potentially promote invoke anyways? (e.g. invoke is jl_interpret_call or some other
-                    //known lesser function)
-                }
-            }
-        }
-        invokenames.erase(it);
-        complete_graph.erase(this_code);
     }
-    // barrier until all threads have finished
-    if (--threads_in_compiler_phase2 == 0)
-        engine_wait.notify_all();
-    else while (threads_in_compiler_phase2)
+    else while (threads_in_compiler_phase) {
         engine_wait.wait(lock);
-
+    }
 }
 
 static void jl_emit_codeinst_to_jit(
         jl_code_instance_t *codeinst,
         jl_code_info_t *src,
-        orc::ThreadSafeContext context)
+        TSMSharedContext &contextowner)
 {
     { // lock scope
         std::unique_lock<std::mutex> lock(engine_lock);
@@ -520,7 +520,7 @@ static void jl_emit_codeinst_to_jit(
     }
     JL_TIMING(CODEINST_COMPILE, CODEINST_COMPILE);
     // emit the code in LLVM IR form to the existing context
-    jl_codegen_params_t params(std::move(context), jl_ExecutionEngine->getDataLayout(), jl_ExecutionEngine->getTargetTriple()); // Locks the context
+    jl_codegen_params_t params(**contextowner, jl_ExecutionEngine->getDataLayout(), jl_ExecutionEngine->getTargetTriple()); // Locks the context
     params.cache = true;
     params.imaging_mode = imaging_default();
     params.debug_level = jl_options.debug_level;
@@ -529,6 +529,9 @@ static void jl_emit_codeinst_to_jit(
     jl_llvm_functions_t decls = jl_emit_codeinst(result_m, codeinst, src, params); // contains safepoints
     if (!result_m)
         return;
+    { // unlock
+        auto release = std::move(params.tsctx_lock);
+    }
     std::unique_lock<std::mutex> lock(engine_lock);
     if (invokenames.count(codeinst))
         return; // destroy everything
@@ -536,21 +539,25 @@ static void jl_emit_codeinst_to_jit(
         return; // destroy everything
     invokenames[codeinst] = decls;
     complete_emit(codeinst);
+    params.tsctx_lock = params.tsctx.getLock();
     int waiting = jl_analyze_workqueue(codeinst, params);
     if (waiting)
-        incompletemodules.insert(std::pair(codeinst, std::pair(std::move(params), waiting)));
+        incompletemodules.insert(std::pair(codeinst, std::tuple(contextowner, std::move(params), waiting)));
     else
         finish_params(result_m, params);
+    { // unlock
+        auto release = std::move(params.tsctx_lock);
+    }
     emittedmodules[codeinst] = std::move(result_m);
     return;
 }
 
 static void recursive_compile_graph(
     jl_code_instance_t *codeinst,
-    jl_code_info_t *src,
-    orc::ThreadSafeContext context)
+    jl_code_info_t *src)
 {
-    jl_emit_codeinst_to_jit(codeinst, src, context);
+    TSMSharedContext contextowner = std::make_shared<JuliaOJIT::ContextPoolT::OwningResource>(jl_ExecutionEngine->getContext());
+    jl_emit_codeinst_to_jit(codeinst, src, contextowner);
     DenseSet<jl_code_instance_t*> Seen;
     SmallVector<jl_code_instance_t*> workqueue;
     workqueue.push_back(codeinst);
@@ -559,7 +566,7 @@ static void recursive_compile_graph(
         auto this_code = workqueue.pop_back_val();
         if (Seen.insert(this_code).second) {
             if (this_code != codeinst)
-                jl_emit_codeinst_to_jit(this_code, nullptr, context); // contains safepoints
+                jl_emit_codeinst_to_jit(this_code, nullptr, contextowner); // contains safepoints
             std::unique_lock<std::mutex> lock(engine_lock);
             auto edges = complete_graph.find(this_code);
             if (edges != complete_graph.end()) {
@@ -567,7 +574,6 @@ static void recursive_compile_graph(
             }
         }
     }
-    prepare_compile(codeinst);
 }
 
 // this generates llvm code for the lambda info
@@ -576,10 +582,9 @@ static void recursive_compile_graph(
 // and generates code for it
 static jl_callptr_t _jl_compile_codeinst(
         jl_code_instance_t *codeinst,
-        jl_code_info_t *src,
-        orc::ThreadSafeContext context)
+        jl_code_info_t *src)
 {
-    recursive_compile_graph(codeinst, src, context);
+    recursive_compile_graph(codeinst, src);
     jl_compile_codeinst_now(codeinst);
     return jl_atomic_load_acquire(&codeinst->invoke);
 }
@@ -622,7 +627,7 @@ int jl_compile_extern_c_impl(LLVMOrcThreadSafeModuleRef llvmmod, void *p, void *
     const char *name = jl_generate_ccallable(wrap(into), sysimg, declrt, sigt, *pparams);
     bool success = true;
     if (!sysimg) {
-        JL_LOCK(&jl_ExecutionEngine->jitlock);
+        JL_LOCK(&jl_ExecutionEngine->jitlock); // TODO: use a better lock
         if (jl_ExecutionEngine->getGlobalValueAddress(name)) {
             success = false;
         }
@@ -702,18 +707,13 @@ extern "C" JL_DLLEXPORT_CODEGEN
 int jl_compile_codeinst_impl(jl_code_instance_t *ci)
 {
     int newly_compiled = 0;
-    if (jl_atomic_load_relaxed(&ci->invoke) != NULL) {
-        return newly_compiled;
-    }
-    JL_LOCK(&jl_ExecutionEngine->jitlock);
     if (jl_atomic_load_relaxed(&ci->invoke) == NULL) {
         ++SpecFPtrCount;
         uint64_t start = jl_typeinf_timing_begin();
-        _jl_compile_codeinst(ci, NULL, *jl_ExecutionEngine->getContext());
+        _jl_compile_codeinst(ci, NULL);
         jl_typeinf_timing_end(start, 0);
         newly_compiled = 1;
     }
-    JL_UNLOCK(&jl_ExecutionEngine->jitlock); // Might GC
     return newly_compiled;
 }
 
@@ -731,7 +731,7 @@ void jl_generate_fptr_for_unspecialized_impl(jl_code_instance_t *unspec)
     uint8_t measure_compile_time_enabled = jl_atomic_load_relaxed(&jl_measure_compile_time_enabled);
     if (measure_compile_time_enabled)
         compiler_start_time = jl_hrtime();
-    JL_LOCK(&jl_ExecutionEngine->jitlock);
+    JL_LOCK(&jl_ExecutionEngine->jitlock); // TODO: use a better lock
     if (jl_atomic_load_relaxed(&unspec->invoke) == NULL) {
         jl_code_info_t *src = NULL;
         JL_GC_PUSH1(&src);
@@ -755,7 +755,7 @@ void jl_generate_fptr_for_unspecialized_impl(jl_code_instance_t *unspec)
             jl_debuginfo_t *debuginfo = src->debuginfo;
             jl_atomic_store_release(&unspec->debuginfo, debuginfo); // n.b. this assumes the field was previously NULL, which is not entirely true
             jl_gc_wb(unspec, debuginfo);
-            _jl_compile_codeinst(unspec, src, *jl_ExecutionEngine->getContext());
+            _jl_compile_codeinst(unspec, src);
         }
         jl_callptr_t null = nullptr;
         // if we hit a codegen bug (or ran into a broken generated function or llvmcall), fall back to the interpreter as a last resort

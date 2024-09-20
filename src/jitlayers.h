@@ -339,6 +339,11 @@ using OptimizerResultT = Expected<orc::ThreadSafeModule>;
 using SharedBytesT = StringSet<MaxAlignedAllocImpl<sizeof(StringSet<>::MapEntryTy)>>;
 
 class JuliaOJIT {
+private:
+    // any verification the user wants to do when adding an OwningResource to the pool
+    template <typename AnyT>
+    static void verifyResource(AnyT &resource) { };
+    static void verifyResource(orc::ThreadSafeContext &context) { assert(context.getContext()); };
 public:
     typedef orc::ObjectLinkingLayer ObjLayerT;
     typedef orc::IRCompileLayer CompileLayerT;
@@ -367,11 +372,16 @@ public:
                 : pool(pool), resource(std::move(resource)) {}
             OwningResource(const OwningResource &) = delete;
             OwningResource &operator=(const OwningResource &) = delete;
-            OwningResource(OwningResource &&) JL_NOTSAFEPOINT = default;
+            OwningResource(OwningResource &&other) JL_NOTSAFEPOINT
+                : pool(other.pool), resource(std::move(other.resource)) {
+                    other.resource.reset();
+                }
             OwningResource &operator=(OwningResource &&) JL_NOTSAFEPOINT = default;
             ~OwningResource() JL_NOTSAFEPOINT { // _LEAVE
-                if (resource)
+                if (resource) {
+                    verifyResource(*resource);
                     pool.release(std::move(*resource));
+                }
             }
             ResourceT release() JL_NOTSAFEPOINT {
                 ResourceT res(std::move(*resource));
@@ -456,6 +466,8 @@ public:
 
         std::unique_ptr<WNMutex> mutex;
     };
+
+    typedef ResourcePool<orc::ThreadSafeContext, 0, std::queue<orc::ThreadSafeContext>> ContextPoolT;
 
     struct DLSymOptimizer;
 
@@ -560,7 +572,7 @@ private:
     std::mutex llvm_printing_mutex{};
     SmallVector<std::function<void()>, 0> PrintLLVMTimers;
 
-    ResourcePool<orc::ThreadSafeContext, 0, std::queue<orc::ThreadSafeContext>> ContextPool;
+    ContextPoolT ContextPool;
 
     std::atomic<size_t> jit_bytes_size{0};
     const std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr;
