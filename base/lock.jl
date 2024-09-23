@@ -578,6 +578,10 @@ end
     export Event
 end
 
+const PerStateInitial       = 0x00
+const PerStateHasrun        = 0x01
+const PerStateErrored       = 0x02
+const PerStateConcurrent    = 0x03
 
 """
     PerProcess{T}
@@ -614,11 +618,11 @@ mutable struct PerProcess{T, F}
     const lock::ReentrantLock
 
     function PerProcess{T,F}(initializer::F) where {T, F}
-        once = new{T,F}(nothing, 0x00, true, initializer, ReentrantLock())
+        once = new{T,F}(nothing, PerStateInitial, true, initializer, ReentrantLock())
         ccall(:jl_set_precompile_field_replace, Cvoid, (Any, Any, Any),
             once, :x, nothing)
         ccall(:jl_set_precompile_field_replace, Cvoid, (Any, Any, Any),
-            once, :state, 0x00)
+            once, :state, PerStateInitial)
         return once
     end
 end
@@ -626,26 +630,26 @@ PerProcess{T}(initializer::F) where {T, F} = PerProcess{T, F}(initializer)
 PerProcess(initializer) = PerProcess{Base.promote_op(initializer), typeof(initializer)}(initializer)
 @inline function (once::PerProcess{T})() where T
     state = (@atomic :acquire once.state)
-    if state != 0x01
+    if state != PerStateHasrun
         (@noinline function init_perprocesss(once, state)
-            state == 0x02 && error("PerProcess initializer failed previously")
+            state == PerStateErrored && error("PerProcess initializer failed previously")
             once.allow_compile_time || __precompile__(false)
             lock(once.lock)
             try
                 state = @atomic :monotonic once.state
-                if state == 0x00
+                if state == PerStateInitial
                     once.x = once.initializer()
-                elseif state == 0x02
+                elseif state == PerStateErrored
                     error("PerProcess initializer failed previously")
-                elseif state != 0x01
+                elseif state != PerStateHasrun
                     error("invalid state for PerProcess")
                 end
             catch
-                state == 0x02 || @atomic :release once.state = 0x02
+                state == PerStateErrored || @atomic :release once.state = PerStateErrored
                 unlock(once.lock)
                 rethrow()
             end
-            state == 0x01 || @atomic :release once.state = 0x01
+            state == PerStateHasrun || @atomic :release once.state = PerStateHasrun
             unlock(once.lock)
             nothing
         end)(once, state)
@@ -674,7 +678,7 @@ function fill_monotonic!(dest::AtomicMemory, x)
 end
 
 
-# share a lock, since we just need it briefly, so some contention is okay
+# share a lock/condition, since we just need it briefly, so some contention is okay
 const PerThreadLock = ThreadSynchronizer()
 """
     PerThread{T}
@@ -734,22 +738,22 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
     ss = @atomic :acquire once.ss
     xs = @atomic :monotonic once.xs
     # n.b. length(xs) >= length(ss)
-    if tid > length(ss) || (@atomic :acquire ss[tid]) != 0x01
+    if tid <= 0 || tid > length(ss) || (@atomic :acquire ss[tid]) != PerStateHasrun
         (@noinline function init_perthread(once, tid)
-            local xs = @atomic :acquire once.xs
-            local ss = @atomic :monotonic once.ss
+            local ss = @atomic :acquire once.ss
+            local xs = @atomic :monotonic once.xs
             local len = length(ss)
             # slow path to allocate it
             nt = Threads.maxthreadid()
-            0 < tid <= nt || ArgumentError("thread id outside of allocated range")
-            if tid <= length(ss) && (@atomic :acquire ss[tid]) == 0x02
+            0 < tid <= nt || throw(ArgumentError("thread id outside of allocated range"))
+            if tid <= length(ss) && (@atomic :acquire ss[tid]) == PerStateErrored
                 error("PerThread initializer failed previously")
             end
             newxs = xs
             newss = ss
             if tid > len
                 # attempt to do all allocations outside of PerThreadLock for better scaling
-                @assert length(xs) == length(ss) "logical constraint violation"
+                @assert length(xs) >= length(ss) "logical constraint violation"
                 newxs = typeof(xs)(undef, len + nt)
                 newss = typeof(ss)(undef, len + nt)
             end
@@ -759,30 +763,30 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
                 ss = @atomic :monotonic once.ss
                 xs = @atomic :monotonic once.xs
                 if tid > length(ss)
-                    @assert length(ss) >= len && newxs !== xs && newss != ss "logical constraint violation"
-                    fill_monotonic!(newss, 0x00)
+                    @assert len <= length(ss) <= length(newss) "logical constraint violation"
+                    fill_monotonic!(newss, PerStateInitial)
                     xs = copyto_monotonic!(newxs, xs)
                     ss = copyto_monotonic!(newss, ss)
                     @atomic :release once.xs = xs
                     @atomic :release once.ss = ss
                 end
                 state = @atomic :monotonic ss[tid]
-                while state == 0x04
+                while state == PerStateConcurrent
                     # lost race, wait for notification this is done running elsewhere
                     wait(PerThreadLock) # wait for initializer to finish without releasing this thread
                     ss = @atomic :monotonic once.ss
-                    state = @atomic :monotonic ss[tid] == 0x04
+                    state = @atomic :monotonic ss[tid]
                 end
-                if state == 0x00
+                if state == PerStateInitial
                     # won the race, drop lock in exchange for state, and run user initializer
-                    @atomic :monotonic ss[tid] = 0x04
+                    @atomic :monotonic ss[tid] = PerStateConcurrent
                     result = try
                         unlock(PerThreadLock)
                         once.initializer()
                     catch
                         lock(PerThreadLock)
                         ss = @atomic :monotonic once.ss
-                        @atomic :release ss[tid] = 0x02
+                        @atomic :release ss[tid] = PerStateErrored
                         notify(PerThreadLock)
                         rethrow()
                     end
@@ -791,11 +795,11 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
                     xs = @atomic :monotonic once.xs
                     @atomic :release xs[tid] = result
                     ss = @atomic :monotonic once.ss
-                    @atomic :release ss[tid] = 0x01
+                    @atomic :release ss[tid] = PerStateHasrun
                     notify(PerThreadLock)
-                elseif state == 0x02
+                elseif state == PerStateErrored
                     error("PerThread initializer failed previously")
-                elseif state != 0x01
+                elseif state != PerStateHasrun
                     error("invalid state for PerThread")
                 end
             finally
