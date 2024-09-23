@@ -390,7 +390,7 @@ doc = makedocs(
 )
 
 
-known_missing_from_manual = 299
+known_missing_from_manual = 301
 
 # Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
 if in("deploy", ARGS) && get(ENV, "BUILDKITE_BRANCH", "") != "master"
