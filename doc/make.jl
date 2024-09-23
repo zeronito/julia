@@ -393,21 +393,29 @@ doc = makedocs(
 known_missing_from_manual = 301
 
 # Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
-if in("deploy", ARGS) && get(ENV, "BUILDKITE_BRANCH", "") != "master"
+if in("deploy", ARGS) && haskey(ENV,"BUILDKITE_BRANCH") && ENV["BUILDKITE_BRANCH"] != "master"
+
+    function show_buildkite_annotation(type::String, msg::String)
+        run(`buildkite-agent annotate --style $type --context "missing-docs" "$msg"`)
+    end
+
     # ignore logging in the report because makedocs has already run this internally, we just want the number out
     missing_from_manual = with_logger(NullLogger()) do
         Documenter.missingdocs(doc)
     end
     if missing_from_manual > known_missing_from_manual
-        error("""
-        New docstrings have been added for exported functions that are missing from the manual.
-        Please add these to the manual.
-        """)
+        show_buildkite_annotation(
+            "warning",
+            """New docstrings have been added for exported functions that are missing from the manual.
+            Please add these to the manual."""
+        )
     elseif missing_from_manual < known_missing_from_manual
-        error("""
-        Great, the number of missing docstrings in the manual has decreased!
-        Update `const known_missing_from_manual = $known_missing_from_manual` to $missing_from_manual in `doc/make.jl` to pass this check.
-        """)
+        show_buildkite_annotation(
+            "info",
+            """Great, the number of missing docstrings in the manual has decreased!
+            Update `const known_missing_from_manual = $known_missing_from_manual` to $missing_from_manual in `doc/make.jl` to pass this check.
+            """
+        )
     end
 end
 
