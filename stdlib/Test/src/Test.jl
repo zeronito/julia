@@ -1872,7 +1872,6 @@ function get_testset_depth()
     something(Base.ScopedValues.get(TESTSET_DEPTH))
 end
 
-                                                                                                  
 _args_and_call((args..., f)...; kwargs...) = (args, kwargs, f(args...; kwargs...))
 _materialize_broadcasted(f, args...) = Broadcast.materialize(Broadcast.broadcasted(f, args...))
 
