@@ -390,11 +390,10 @@ doc = makedocs(
 )
 
 
-const known_missing_from_manual = 299
+known_missing_from_manual = 299
 
 # Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
-# Only check on Linux 64-bit because the number is platform-dependent
-if !in("deploy", ARGS) && Sys.islinux() && Sys.WORD_SIZE == 64
+if in("deploy", ARGS) && get(ENV, "BUILDKITE_BRANCH", "") != "master"
     # ignore logging in the report because makedocs has already run this internally, we just want the number out
     missing_from_manual = with_logger(NullLogger()) do
         Documenter.missingdocs(doc)
