@@ -390,12 +390,17 @@ doc = makedocs(
 )
 
 # update this when the number of missing docstrings changes
-const known_missing_from_manual = 301
+const known_missing_from_manual = 300
 
 # Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
 if in("deploy", ARGS) && haskey(ENV,"BUILDKITE_BRANCH") && ENV["BUILDKITE_BRANCH"] != "master"
 
     function show_buildkite_annotation(type::String, msg::String)
+        if type == "success"
+            @info msg
+        else
+            @warn msg
+        end
         run(`buildkite-agent annotate --style $type --context "missing-docs" "$msg"`)
     end
 
