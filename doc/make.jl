@@ -389,8 +389,8 @@ doc = makedocs(
     debug     = true, # makes makedocs return the Documenter object for use later
 )
 
-
-known_missing_from_manual = 301
+# update this when the number of missing docstrings changes
+const known_missing_from_manual = 301
 
 # Check that we're not regressing in missing docs, but only check on PRs so that master builds can still pass
 if in("deploy", ARGS) && haskey(ENV,"BUILDKITE_BRANCH") && ENV["BUILDKITE_BRANCH"] != "master"
@@ -411,9 +411,12 @@ if in("deploy", ARGS) && haskey(ENV,"BUILDKITE_BRANCH") && ENV["BUILDKITE_BRANCH
         )
     elseif missing_from_manual < known_missing_from_manual
         show_buildkite_annotation(
-            "info",
-            """Great, the number of missing docstrings in the manual has decreased!
-            Update `const known_missing_from_manual = $known_missing_from_manual` to $missing_from_manual in `doc/make.jl` to pass this check.
+            "success",
+            """🎉 The number of missing docstrings in the manual has decreased!
+            Update `doc/make.jl` from $known_missing_from_manual to:
+            ```term
+            const known_missing_from_manual = $missing_from_manual
+            ```
             """
         )
     end
