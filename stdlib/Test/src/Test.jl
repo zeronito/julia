@@ -29,6 +29,7 @@ using Random: AbstractRNG, default_rng
 using InteractiveUtils: gen_call_with_extracted_types
 using Base: typesplit, remove_linenums!
 using Serialization: Serialization
+using Base.ScopedValues: ScopedValue, @with
 
 const DISPLAY_FAILED = (
     :isequal,
@@ -1840,14 +1841,14 @@ end
 #-----------------------------------------------------------------------
 # Various helper methods for test sets
 
-const CURRENT_TESTSET = Base.ScopedValue{AbstractTestSet}(FallbackTestSet())
-const TESTSET_DEPTH = Base.ScopedValue{Int}(0)
+const CURRENT_TESTSET = ScopedValue{AbstractTestSet}(FallbackTestSet())
+const TESTSET_DEPTH = ScopedValue{Int}(0)
 
 macro with_testset(ts, expr)
     quote
         ts = $(esc(ts))
         $(Expr(:tryfinally,
-            :(Base.@with(CURRENT_TESTSET => ts, TESTSET_DEPTH => get_testset_depth() + 1, $(esc(expr)))),
+            :(@with(CURRENT_TESTSET => ts, TESTSET_DEPTH => get_testset_depth() + 1, $(esc(expr)))),
             :(finish(ts))
         ))
     end
