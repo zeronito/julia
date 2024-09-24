@@ -375,19 +375,19 @@ end
     end
 end
 
-let once = PerProcess(() -> return [nothing])
-    @test typeof(once) <: PerProcess{Vector{Nothing}}
+let once = OncePerProcess(() -> return [nothing])
+    @test typeof(once) <: OncePerProcess{Vector{Nothing}}
     x = once()
     @test x === once()
     @atomic once.state = 0xff
-    @test_throws ErrorException("invalid state for PerProcess") once()
-    @test_throws ErrorException("PerProcess initializer failed previously") once()
+    @test_throws ErrorException("invalid state for OncePerProcess") once()
+    @test_throws ErrorException("OncePerProcess initializer failed previously") once()
     @atomic once.state = 0x01
     @test x === once()
 end
-let once = PerProcess{Int}(() -> error("expected"))
+let once = OncePerProcess{Int}(() -> error("expected"))
     @test_throws ErrorException("expected") once()
-    @test_throws ErrorException("PerProcess initializer failed previously") once()
+    @test_throws ErrorException("OncePerProcess initializer failed previously") once()
 end
 
 let e = Base.Event(true),
@@ -395,15 +395,15 @@ let e = Base.Event(true),
     finish = Channel{Nothing}(Inf),
     exiting = Channel{Nothing}(Inf),
     starttest2 = Event(),
-    once = PerThread() do
+    once = OncePerThread() do
         push!(started, threadid())
         take!(finish)
         return [nothing]
     end
-    alls = PerThread() do
+    alls = OncePerThread() do
         return [nothing]
     end
-    @test typeof(once) <: PerThread{Vector{Nothing}}
+    @test typeof(once) <: OncePerThread{Vector{Nothing}}
     push!(finish, nothing)
     @test_throws ArgumentError once[0]
     x = once()
@@ -419,10 +419,10 @@ let e = Base.Event(true),
         function cl()
             GC.gc(false) # stress test the GC-safepoint mechanics of jl_adopt_thread
             try
+                newthreads[i] = threadid()
                 local y = once()
                 onces[i] = y
                 @test x !== y === once() === once[threadid()]
-                newthreads[i] = threadid()
                 wait(starttest2)
                 allonces[i] = Vector{Nothing}[alls[tid] for tid in newthreads]
             catch ex
@@ -482,19 +482,19 @@ let e = Base.Event(true),
     @test_throws ArgumentError once[-1]
 
 end
-let once = PerThread{Int}(() -> error("expected"))
+let once = OncePerThread{Int}(() -> error("expected"))
     @test_throws ErrorException("expected") once()
-    @test_throws ErrorException("PerThread initializer failed previously") once()
+    @test_throws ErrorException("OncePerThread initializer failed previously") once()
 end
 
-let once = PerTask(() -> return [nothing])
-    @test typeof(once) <: PerTask{Vector{Nothing}}
+let once = OncePerTask(() -> return [nothing])
+    @test typeof(once) <: OncePerTask{Vector{Nothing}}
     x = once()
     @test x === once() !== fetch(@async once())
     delete!(task_local_storage(), once)
     @test x !== once() === once()
 end
-let once = PerTask{Int}(() -> error("expected"))
+let once = OncePerTask{Int}(() -> error("expected"))
     @test_throws ErrorException("expected") once()
     @test_throws ErrorException("expected") once()
 end

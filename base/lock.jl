@@ -584,9 +584,9 @@ const PerStateErrored       = 0x02
 const PerStateConcurrent    = 0x03
 
 """
-    PerProcess{T}
+    OncePerProcess{T}
 
-Calling a `PerProcess` object returns a value of type `T` by running the
+Calling a `OncePerProcess` object returns a value of type `T` by running the
 function `initializer` exactly once per process. All concurrent and future
 calls in the same process will return exactly the same value. This is useful in
 code that will be precompiled, as it allows setting up caches or other state
@@ -595,7 +595,7 @@ which won't get serialized.
 ## Example
 
 ```jldoctest
-julia> const global_state = Base.PerProcess{Vector{UInt32}}() do
+julia> const global_state = Base.OncePerProcess{Vector{UInt32}}() do
            println("Making lazy global value...done.")
            return [Libc.rand()]
        end;
@@ -610,14 +610,14 @@ julia> procstate === fetch(@async global_state())
 true
 ```
 """
-mutable struct PerProcess{T, F}
+mutable struct OncePerProcess{T, F}
     x::Union{Nothing,T}
     @atomic state::UInt8 # 0=initial, 1=hasrun, 2=error
     @atomic allow_compile_time::Bool
     const initializer::F
     const lock::ReentrantLock
 
-    function PerProcess{T,F}(initializer::F) where {T, F}
+    function OncePerProcess{T,F}(initializer::F) where {T, F}
         once = new{T,F}(nothing, PerStateInitial, true, initializer, ReentrantLock())
         ccall(:jl_set_precompile_field_replace, Cvoid, (Any, Any, Any),
             once, :x, nothing)
@@ -626,13 +626,13 @@ mutable struct PerProcess{T, F}
         return once
     end
 end
-PerProcess{T}(initializer::F) where {T, F} = PerProcess{T, F}(initializer)
-PerProcess(initializer) = PerProcess{Base.promote_op(initializer), typeof(initializer)}(initializer)
-@inline function (once::PerProcess{T})() where T
+OncePerProcess{T}(initializer::F) where {T, F} = OncePerProcess{T, F}(initializer)
+OncePerProcess(initializer) = OncePerProcess{Base.promote_op(initializer), typeof(initializer)}(initializer)
+@inline function (once::OncePerProcess{T})() where T
     state = (@atomic :acquire once.state)
     if state != PerStateHasrun
         (@noinline function init_perprocesss(once, state)
-            state == PerStateErrored && error("PerProcess initializer failed previously")
+            state == PerStateErrored && error("OncePerProcess initializer failed previously")
             once.allow_compile_time || __precompile__(false)
             lock(once.lock)
             try
@@ -640,9 +640,9 @@ PerProcess(initializer) = PerProcess{Base.promote_op(initializer), typeof(initia
                 if state == PerStateInitial
                     once.x = once.initializer()
                 elseif state == PerStateErrored
-                    error("PerProcess initializer failed previously")
+                    error("OncePerProcess initializer failed previously")
                 elseif state != PerStateHasrun
-                    error("invalid state for PerProcess")
+                    error("invalid state for OncePerProcess")
                 end
             catch
                 state == PerStateErrored || @atomic :release once.state = PerStateErrored
@@ -681,9 +681,9 @@ end
 # share a lock/condition, since we just need it briefly, so some contention is okay
 const PerThreadLock = ThreadSynchronizer()
 """
-    PerThread{T}
+    OncePerThread{T}
 
-Calling a `PerThread` object returns a value of type `T` by running the function
+Calling a `OncePerThread` object returns a value of type `T` by running the function
 `initializer` exactly once per thread. All future calls in the same thread, and
 concurrent or future calls with the same thread id, will return exactly the
 same value. The object can also be indexed by the threadid for any existing
@@ -696,12 +696,12 @@ returned here may alias other values or change in the middle of your program. Th
 get deprecated in the future. If initializer yields, the thread running the current task
 after the call might not be the same as the one at the start of the call.
 
-See also: [`PerTask`](@ref).
+See also: [`OncePerTask`](@ref).
 
 ## Example
 
 ```jldoctest
-julia> const thread_state = Base.PerThread{Vector{UInt32}}() do
+julia> const thread_state = Base.OncePerThread{Vector{UInt32}}() do
            println("Making lazy thread value...done.")
            return [Libc.rand()]
        end;
@@ -716,12 +716,12 @@ julia> threadvec === thread_state[Threads.threadid()]
 true
 ```
 """
-mutable struct PerThread{T, F}
+mutable struct OncePerThread{T, F}
     @atomic xs::AtomicMemory{T} # values
     @atomic ss::AtomicMemory{UInt8} # states: 0=initial, 1=hasrun, 2=error, 3==concurrent
     const initializer::F
 
-    function PerThread{T,F}(initializer::F) where {T, F}
+    function OncePerThread{T,F}(initializer::F) where {T, F}
         xs, ss = AtomicMemory{T}(), AtomicMemory{UInt8}()
         once = new{T,F}(xs, ss, initializer)
         ccall(:jl_set_precompile_field_replace, Cvoid, (Any, Any, Any),
@@ -731,9 +731,9 @@ mutable struct PerThread{T, F}
         return once
     end
 end
-PerThread{T}(initializer::F) where {T, F} = PerThread{T,F}(initializer)
-PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initializer)}(initializer)
-@inline function getindex(once::PerThread, tid::Integer)
+OncePerThread{T}(initializer::F) where {T, F} = OncePerThread{T,F}(initializer)
+OncePerThread(initializer) = OncePerThread{Base.promote_op(initializer), typeof(initializer)}(initializer)
+@inline function getindex(once::OncePerThread, tid::Integer)
     tid = Int(tid)
     ss = @atomic :acquire once.ss
     xs = @atomic :monotonic once.xs
@@ -747,7 +747,7 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
             nt = Threads.maxthreadid()
             0 < tid <= nt || throw(ArgumentError("thread id outside of allocated range"))
             if tid <= length(ss) && (@atomic :acquire ss[tid]) == PerStateErrored
-                error("PerThread initializer failed previously")
+                error("OncePerThread initializer failed previously")
             end
             newxs = xs
             newss = ss
@@ -798,9 +798,9 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
                     @atomic :release ss[tid] = PerStateHasrun
                     notify(PerThreadLock)
                 elseif state == PerStateErrored
-                    error("PerThread initializer failed previously")
+                    error("OncePerThread initializer failed previously")
                 elseif state != PerStateHasrun
-                    error("invalid state for PerThread")
+                    error("invalid state for OncePerThread")
                 end
             finally
                 unlock(PerThreadLock)
@@ -811,12 +811,12 @@ PerThread(initializer) = PerThread{Base.promote_op(initializer), typeof(initiali
     end
     return xs[tid]
 end
-@inline (once::PerThread)() = once[Threads.threadid()]
+@inline (once::OncePerThread)() = once[Threads.threadid()]
 
 """
-    PerTask{T}
+    OncePerTask{T}
 
-Calling a `PerTask` object returns a value of type `T` by running the function `initializer`
+Calling a `OncePerTask` object returns a value of type `T` by running the function `initializer`
 exactly once per Task. All future calls in the same Task will return exactly the same value.
 
 See also: [`task_local_storage`](@ref).
@@ -824,7 +824,7 @@ See also: [`task_local_storage`](@ref).
 ## Example
 
 ```jldoctest
-julia> const task_state = Base.PerTask{Vector{UInt32}}() do
+julia> const task_state = Base.OncePerTask{Vector{UInt32}}() do
            println("Making lazy task value...done.")
            return [Libc.rand()]
        end;
@@ -840,11 +840,11 @@ Making lazy task value...done.
 false
 ```
 """
-mutable struct PerTask{T, F}
+mutable struct OncePerTask{T, F}
     const initializer::F
 
-    PerTask{T}(initializer::F) where {T, F} = new{T,F}(initializer)
-    PerTask{T,F}(initializer::F) where {T, F} = new{T,F}(initializer)
-    PerTask(initializer) = new{Base.promote_op(initializer), typeof(initializer)}(initializer)
+    OncePerTask{T}(initializer::F) where {T, F} = new{T,F}(initializer)
+    OncePerTask{T,F}(initializer::F) where {T, F} = new{T,F}(initializer)
+    OncePerTask(initializer) = new{Base.promote_op(initializer), typeof(initializer)}(initializer)
 end
-@inline (once::PerTask)() = get!(once.initializer, task_local_storage(), once)
+@inline (once::OncePerTask)() = get!(once.initializer, task_local_storage(), once)
