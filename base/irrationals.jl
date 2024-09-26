@@ -51,22 +51,53 @@ AbstractFloat(x::AbstractIrrational) = Float64(x)::Float64
 Float16(x::AbstractIrrational) = Float16(Float32(x)::Float32)
 Complex{T}(x::AbstractIrrational) where {T<:Real} = Complex{T}(T(x))
 
-# XXX this may change `DEFAULT_PRECISION`, thus not effect free
-@assume_effects :total function Rational{T}(x::AbstractIrrational) where T<:Integer
-    o = precision(BigFloat)
-    p = 256
-    while true
-        setprecision(BigFloat, p)
-        bx = BigFloat(x)
-        r = rationalize(T, bx, tol=0)
-        if abs(BigFloat(r) - bx) > eps(bx)
-            setprecision(BigFloat, o)
-            return r
+function _irrational_to_rational_at_current_precision(
+    ::Type{T}, x::AbstractIrrational,
+) where {T <: Integer}
+    bx = BigFloat(x)
+    if isinteger(bx)
+        # Either the FP significand or the FP exponent are too narrow.
+        nothing
+    else
+        let r = rationalize(T, bx, tol = 0)
+            if eps(bx) < abs(1 - r/bx)
+                r
+            else
+                # Error is too small, repeat with greater precision.
+                nothing
+            end
         end
-        p += 32
     end
 end
-Rational{BigInt}(x::AbstractIrrational) = throw(ArgumentError("Cannot convert an AbstractIrrational to a Rational{BigInt}: use rationalize(BigInt, x) instead"))
+
+function _irrational_to_rational_at_precision(
+    ::Type{T}, x::AbstractIrrational, p::Int,
+) where {T <: Integer}
+    f = let x = x
+        () -> _irrational_to_rational_at_current_precision(T, x)
+    end
+    setprecision(f, BigFloat, p)
+end
+
+function _irrational_to_rational(::Type{T}, x::AbstractIrrational) where {T <: Integer}
+    if T <: BigInt
+        _throw_argument_error_irrational_to_rational_bigint()
+    end
+    ran = 256:32:65536
+    for p ∈ ran
+        r = _irrational_to_rational_at_precision(T, x, p)
+        if r !== nothing
+            return r
+        end
+    end
+    throw(ArgumentError("failed to rationalize irrational"))
+end
+
+function Rational{T}(x::AbstractIrrational) where {T <: Integer}
+    _irrational_to_rational(T, x)
+end
+_throw_argument_error_irrational_to_rational_bigint() = throw(ArgumentError("Cannot convert an AbstractIrrational to a Rational{BigInt}: use rationalize(BigInt, x) instead"))
+Rational{BigInt}(x::AbstractIrrational) = _throw_argument_error_irrational_to_rational_bigint()
 
 @assume_effects :total function (t::Type{T})(x::AbstractIrrational, r::RoundingMode) where T<:Union{Float32,Float64}
     setprecision(BigFloat, 256) do
