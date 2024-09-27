@@ -3014,7 +3014,7 @@ function abstract_eval_globalref(interp::AbstractInterpreter, g::GlobalRef, sv::
     rt = abstract_eval_globalref_type(g)
     consistent = inaccessiblememonly = ALWAYS_FALSE
     nothrow = false
-    if isa(rt, Const)
+    if isa(rt, Const) # implies `isdefinedconst_globalref(g) === true`
         consistent = ALWAYS_TRUE
         nothrow = true
         if is_mutation_free_argtype(rt)
@@ -3027,8 +3027,6 @@ function abstract_eval_globalref(interp::AbstractInterpreter, g::GlobalRef, sv::
         else
             rt = Union{}
         end
-    elseif isdefinedconst_globalref(g)
-        nothrow = true
     end
     return RTEffects(rt, nothrow ? Union{} : UndefVarError, Effects(EFFECTS_TOTAL; consistent, nothrow, inaccessiblememonly))
 end
