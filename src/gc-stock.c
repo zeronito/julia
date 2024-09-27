@@ -553,24 +553,6 @@ static void sweep_big(jl_ptls_t ptls) JL_NOTSAFEPOINT
     gc_time_big_end();
 }
 
-// tracking Memorys with malloc'd storage
-
-void jl_gc_track_malloced_genericmemory(jl_ptls_t ptls, jl_genericmemory_t *m, int isaligned){
-    // This is **NOT** a GC safe point.
-    mallocmemory_t *ma;
-    if (ptls->gc_tls.heap.mafreelist == NULL) {
-        ma = (mallocmemory_t*)malloc_s(sizeof(mallocmemory_t));
-    }
-    else {
-        ma = ptls->gc_tls.heap.mafreelist;
-        ptls->gc_tls.heap.mafreelist = ma->next;
-    }
-    ma->a = (jl_genericmemory_t*)((uintptr_t)m | !!isaligned);
-    ma->next = ptls->gc_tls.heap.mallocarrays;
-    ptls->gc_tls.heap.mallocarrays = ma;
-}
-
-
 void jl_gc_count_allocd(size_t sz) JL_NOTSAFEPOINT
 {
     jl_ptls_t ptls = jl_current_task->ptls;
@@ -646,17 +628,6 @@ void jl_gc_reset_alloc_count(void) JL_NOTSAFEPOINT
     gc_num.deferred_alloc = 0;
     reset_thread_gc_counts();
 }
-
-size_t jl_genericmemory_nbytes(jl_genericmemory_t *m) JL_NOTSAFEPOINT
-{
-    const jl_datatype_layout_t *layout = ((jl_datatype_t*)jl_typetagof(m))->layout;
-    size_t sz = layout->size * m->length;
-    if (layout->flags.arrayelem_isunion)
-        // account for isbits Union array selector bytes
-        sz += m->length;
-    return sz;
-}
-
 
 static void jl_gc_free_memory(jl_value_t *v, int isaligned) JL_NOTSAFEPOINT
 {
@@ -814,6 +785,29 @@ JL_DLLEXPORT jl_value_t *jl_gc_small_alloc(jl_ptls_t ptls, int offset, int osize
 // into this. (See https://github.com/JuliaLang/julia/pull/43868 for more details.)
 jl_value_t *jl_gc_small_alloc_noinline(jl_ptls_t ptls, int offset, int osize) {
     return jl_gc_small_alloc_inner(ptls, offset, osize);
+}
+
+// Size does NOT include the type tag!!
+inline jl_value_t *jl_gc_alloc_(jl_ptls_t ptls, size_t sz, void *ty)
+{
+    jl_value_t *v;
+    const size_t allocsz = sz + sizeof(jl_taggedvalue_t);
+    if (sz <= GC_MAX_SZCLASS) {
+        int pool_id = jl_gc_szclass(allocsz);
+        jl_gc_pool_t *p = &ptls->gc_tls.heap.norm_pools[pool_id];
+        int osize = jl_gc_sizeclasses[pool_id];
+        // We call `jl_gc_small_alloc_noinline` instead of `jl_gc_small_alloc` to avoid double-counting in
+        // the Allocations Profiler. (See https://github.com/JuliaLang/julia/pull/43868 for more details.)
+        v = jl_gc_small_alloc_noinline(ptls, (char*)p - (char*)ptls, osize);
+    }
+    else {
+        if (allocsz < sz) // overflow in adding offs, size was "negative"
+            jl_throw(jl_memory_exception);
+        v = jl_gc_big_alloc_noinline(ptls, allocsz);
+    }
+    jl_set_typeof(v, ty);
+    maybe_record_alloc_to_profile(v, sz, (jl_datatype_t*)ty);
+    return v;
 }
 
 int jl_gc_classify_pools(size_t sz, int *osize)
@@ -2792,34 +2786,8 @@ static void sweep_finalizer_list(arraylist_t *list)
     list->len = j;
 }
 
-// collector entry point and control
-_Atomic(uint32_t) jl_gc_disable_counter = 1;
-
-JL_DLLEXPORT int jl_gc_enable(int on)
-{
-    jl_ptls_t ptls = jl_current_task->ptls;
-    int prev = !ptls->disable_gc;
-    ptls->disable_gc = (on == 0);
-    if (on && !prev) {
-        // disable -> enable
-        if (jl_atomic_fetch_add(&jl_gc_disable_counter, -1) == 1) {
-            gc_num.allocd += gc_num.deferred_alloc;
-            gc_num.deferred_alloc = 0;
-        }
-    }
-    else if (prev && !on) {
-        // enable -> disable
-        jl_atomic_fetch_add(&jl_gc_disable_counter, 1);
-        // check if the GC is running and wait for it to finish
-        jl_gc_safepoint_(ptls);
-    }
-    return prev;
-}
-
-JL_DLLEXPORT int jl_gc_is_enabled(void)
-{
-    jl_ptls_t ptls = jl_current_task->ptls;
-    return !ptls->disable_gc;
+int gc_is_collector_thread(int tid) JL_NOTSAFEPOINT {
+    return gc_is_parallel_collector_thread(tid) || gc_is_concurrent_collector_thread(tid);
 }
 
 JL_DLLEXPORT void jl_gc_get_total_bytes(int64_t *bytes) JL_NOTSAFEPOINT
@@ -2828,11 +2796,6 @@ JL_DLLEXPORT void jl_gc_get_total_bytes(int64_t *bytes) JL_NOTSAFEPOINT
     combine_thread_gc_counts(&num, 0);
     // Sync this logic with `base/util.jl:GC_Diff`
     *bytes = (num.total_allocd + num.deferred_alloc + num.allocd);
-}
-
-JL_DLLEXPORT uint64_t jl_gc_total_hrtime(void)
-{
-    return gc_num.total_time;
 }
 
 JL_DLLEXPORT jl_gc_num_t jl_gc_num(void)
@@ -3208,8 +3171,7 @@ static int _jl_gc_collect(jl_ptls_t ptls, jl_gc_collection_t collection)
         // free empty GC state for threads that have exited
         if (jl_atomic_load_relaxed(&ptls2->current_task) == NULL) {
             // GC threads should never exit
-            assert(!gc_is_parallel_collector_thread(t_i));
-            assert(!gc_is_concurrent_collector_thread(t_i));
+            assert(!gc_is_collector_thread(t_i));
             jl_thread_heap_t *heap = &ptls2->gc_tls.heap;
             if (heap->weak_refs.len == 0)
                 small_arraylist_free(&heap->weak_refs);
@@ -3384,13 +3346,6 @@ void gc_mark_queue_all_roots(jl_ptls_t ptls, jl_gc_markqueue_t *mq)
             gc_queue_thread_local(mq, ptls2);
     }
     gc_mark_roots(mq);
-}
-
-// allocator entry points
-
-JL_DLLEXPORT jl_value_t *(jl_gc_alloc)(jl_ptls_t ptls, size_t sz, void *ty)
-{
-    return jl_gc_alloc_(ptls, sz, ty);
 }
 
 // Per-thread initialization
@@ -3674,63 +3629,6 @@ JL_DLLEXPORT void *jl_gc_counted_realloc_with_old_size(void *p, size_t old, size
     return data;
 }
 
-// allocation wrappers that save the size of allocations, to allow using
-// jl_gc_counted_* functions with a libc-compatible API.
-
-JL_DLLEXPORT void *jl_malloc(size_t sz)
-{
-    int64_t *p = (int64_t *)jl_gc_counted_malloc(sz + JL_SMALL_BYTE_ALIGNMENT);
-    if (p == NULL)
-        return NULL;
-    p[0] = sz;
-    return (void *)(p + 2); // assumes JL_SMALL_BYTE_ALIGNMENT == 16
-}
-
-//_unchecked_calloc does not check for potential overflow of nm*sz
-STATIC_INLINE void *_unchecked_calloc(size_t nm, size_t sz) {
-    size_t nmsz = nm*sz;
-    int64_t *p = (int64_t *)jl_gc_counted_calloc(nmsz + JL_SMALL_BYTE_ALIGNMENT, 1);
-    if (p == NULL)
-        return NULL;
-    p[0] = nmsz;
-    return (void *)(p + 2); // assumes JL_SMALL_BYTE_ALIGNMENT == 16
-}
-
-JL_DLLEXPORT void *jl_calloc(size_t nm, size_t sz)
-{
-    if (nm > SSIZE_MAX/sz - JL_SMALL_BYTE_ALIGNMENT)
-        return NULL;
-    return _unchecked_calloc(nm, sz);
-}
-
-JL_DLLEXPORT void jl_free(void *p)
-{
-    if (p != NULL) {
-        int64_t *pp = (int64_t *)p - 2;
-        size_t sz = pp[0];
-        jl_gc_counted_free_with_size(pp, sz + JL_SMALL_BYTE_ALIGNMENT);
-    }
-}
-
-JL_DLLEXPORT void *jl_realloc(void *p, size_t sz)
-{
-    int64_t *pp;
-    size_t szold;
-    if (p == NULL) {
-        pp = NULL;
-        szold = 0;
-    }
-    else {
-        pp = (int64_t *)p - 2;
-        szold = pp[0] + JL_SMALL_BYTE_ALIGNMENT;
-    }
-    int64_t *pnew = (int64_t *)jl_gc_counted_realloc_with_old_size(pp, szold, sz + JL_SMALL_BYTE_ALIGNMENT);
-    if (pnew == NULL)
-        return NULL;
-    pnew[0] = sz;
-    return (void *)(pnew + 2); // assumes JL_SMALL_BYTE_ALIGNMENT == 16
-}
-
 // allocating blocks for Arrays and Strings
 
 JL_DLLEXPORT void *jl_gc_managed_malloc(size_t sz)
@@ -3864,18 +3762,6 @@ jl_value_t *jl_gc_permobj(size_t sz, void *ty) JL_NOTSAFEPOINT
     return jl_valueof(o);
 }
 
-JL_DLLEXPORT jl_weakref_t *jl_gc_new_weakref(jl_value_t *value)
-{
-    jl_ptls_t ptls = jl_current_task->ptls;
-    return jl_gc_new_weakref_th(ptls, value);
-}
-
-JL_DLLEXPORT jl_value_t *jl_gc_allocobj(size_t sz)
-{
-    jl_ptls_t ptls = jl_current_task->ptls;
-    return jl_gc_alloc(ptls, sz, NULL);
-}
-
 JL_DLLEXPORT int jl_gc_enable_conservative_gc_support(void)
 {
     if (jl_is_initialized()) {
@@ -4002,11 +3888,6 @@ JL_DLLEXPORT size_t jl_gc_external_obj_hdr_size(void)
     return sizeof(bigval_t);
 }
 
-
-JL_DLLEXPORT void * jl_gc_alloc_typed(jl_ptls_t ptls, size_t sz, void *ty)
-{
-    return jl_gc_alloc(ptls, sz, ty);
-}
 
 JL_DLLEXPORT void jl_gc_schedule_foreign_sweepfunc(jl_ptls_t ptls, jl_value_t *obj)
 {
