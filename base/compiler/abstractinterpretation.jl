@@ -54,7 +54,6 @@ function abstract_call_gf_by_type(interp::AbstractInterpreter, @nospecialize(f),
     update_valid_age!(sv, valid_worlds)
     napplicable = length(applicable)
     rettype = exctype = Bottom
-    edges = MethodInstance[]
     conditionals = nothing # keeps refinement information of call argument types when the return type is boolean
     seen = 0               # number of signatures actually inferred
     const_results = nothing # or const_results::Vector{Union{Nothing,ConstResult}} if any const results are available
@@ -110,7 +109,6 @@ function abstract_call_gf_by_type(interp::AbstractInterpreter, @nospecialize(f),
                     end
                     const_results[i] = const_result
                 end
-                edge === nothing || push!(edges, edge)
                 this_rt = this_rt ⊔ₚ rt
                 this_exct = this_exct ⊔ₚ exct
                 if bail_out_call(interp, this_rt, sv)
@@ -167,7 +165,6 @@ function abstract_call_gf_by_type(interp::AbstractInterpreter, @nospecialize(f),
                 end
                 const_results[i] = const_result
             end
-            edge === nothing || push!(edges, edge)
         end
         @assert !(this_conditional isa Conditional || this_rt isa MustAlias) "invalid lattice element returned from inter-procedural context"
         seen += 1
@@ -248,8 +245,6 @@ function abstract_call_gf_by_type(interp::AbstractInterpreter, @nospecialize(f),
         # and avoid keeping track of a more complex result type.
         rettype = Any
     end
-    any_slot_refined = slotrefinements !== nothing
-    add_call_backedges!(interp, rettype, all_effects, any_slot_refined, edges, matches, atype, sv)
     if isa(sv, InferenceState)
         # TODO (#48913) implement a proper recursion handling for irinterp:
         # This works just because currently the `:terminate` condition guarantees that
@@ -280,12 +275,6 @@ any_ambig(info::MethodMatchInfo) = any_ambig(info.results)
 any_ambig(m::MethodMatches) = any_ambig(m.info)
 fully_covering(info::MethodMatchInfo) = info.fullmatch
 fully_covering(m::MethodMatches) = fully_covering(m.info)
-function add_uncovered_edges!(sv::AbsIntState, info::MethodMatchInfo, @nospecialize(atype))
-    fully_covering(info) || add_mt_backedge!(sv, info.mt, atype)
-    nothing
-end
-add_uncovered_edges!(sv::AbsIntState, matches::MethodMatches, @nospecialize(atype)) =
-    add_uncovered_edges!(sv, matches.info, atype)
 
 struct UnionSplitMethodMatches
     applicable::Vector{Any}
@@ -297,23 +286,14 @@ any_ambig(info::UnionSplitInfo) = any(any_ambig, info.split)
 any_ambig(m::UnionSplitMethodMatches) = any_ambig(m.info)
 fully_covering(info::UnionSplitInfo) = all(fully_covering, info.split)
 fully_covering(m::UnionSplitMethodMatches) = fully_covering(m.info)
-function add_uncovered_edges!(sv::AbsIntState, info::UnionSplitInfo, @nospecialize(atype))
-    all(fully_covering, info.split) && return nothing
-    # add mt backedges with removing duplications
-    for mt in uncovered_method_tables(info)
-        add_mt_backedge!(sv, mt, atype)
-    end
-end
-add_uncovered_edges!(sv::AbsIntState, matches::UnionSplitMethodMatches, @nospecialize(atype)) =
-    add_uncovered_edges!(sv, matches.info, atype)
-function uncovered_method_tables(info::UnionSplitInfo)
-    mts = MethodTable[]
+
+nmatches(info::MethodMatchInfo) = length(info.results)
+function nmatches(info::UnionSplitInfo)
+    n = 0
     for mminfo in info.split
-        fully_covering(mminfo) && continue
-        any(mt′::MethodTable->mt′===mminfo.mt, mts) && continue
-        push!(mts, mminfo.mt)
+        n += nmatches(mminfo)
     end
-    return mts
+    return n
 end
 
 function find_method_matches(interp::AbstractInterpreter, argtypes::Vector{Any}, @nospecialize(atype);
@@ -352,7 +332,7 @@ function find_union_split_method_matches(interp::AbstractInterpreter, argtypes::
         end
         valid_worlds = intersect(valid_worlds, thismatches.valid_worlds)
         thisfullmatch = any(match::MethodMatch->match.fully_covers, thismatches)
-        thisinfo = MethodMatchInfo(thismatches, mt, thisfullmatch)
+        thisinfo = MethodMatchInfo(thismatches, mt, sig_n, thisfullmatch)
         push!(infos, thisinfo)
     end
     info = UnionSplitInfo(infos)
@@ -373,7 +353,7 @@ function find_simple_method_matches(interp::AbstractInterpreter, @nospecialize(a
         return FailedMethodMatch("Too many methods matched")
     end
     fullmatch = any(match::MethodMatch->match.fully_covers, matches)
-    info = MethodMatchInfo(matches, mt, fullmatch)
+    info = MethodMatchInfo(matches, mt, atype, fullmatch)
     return MethodMatches(matches.matches, info, matches.valid_worlds)
 end
 
@@ -571,31 +551,6 @@ function collect_slot_refinements(𝕃ᵢ::AbstractLattice, applicable::Vector{A
         end
     end
     return slotrefinements
-end
-
-function add_call_backedges!(interp::AbstractInterpreter, @nospecialize(rettype),
-    all_effects::Effects, any_slot_refined::Bool, edges::Vector{MethodInstance},
-    matches::Union{MethodMatches,UnionSplitMethodMatches}, @nospecialize(atype),
-    sv::AbsIntState)
-    # don't bother to add backedges when both type and effects information are already
-    # maximized to the top since a new method couldn't refine or widen them anyway
-    if rettype === Any
-        # ignore the `:nonoverlayed` property if `interp` doesn't use overlayed method table
-        # since it will never be tainted anyway
-        if !isoverlayed(method_table(interp))
-            all_effects = Effects(all_effects; nonoverlayed=ALWAYS_FALSE)
-        end
-        if all_effects === Effects() && !any_slot_refined
-            return nothing
-        end
-    end
-    for edge in edges
-        add_backedge!(sv, edge)
-    end
-    # also need an edge to the method table in case something gets
-    # added that did not intersect with any existing method
-    add_uncovered_edges!(sv, matches, atype)
-    return nothing
 end
 
 const RECURSION_UNUSED_MSG = "Bounded recursion detected with unused result. Annotated return type may be wider than true result."
@@ -2188,8 +2143,7 @@ function abstract_invoke(interp::AbstractInterpreter, arginfo::ArgInfo, si::Stmt
         end
     end
     rt = from_interprocedural!(interp, rt, sv, arginfo, sig)
-    info = InvokeCallInfo(match, const_result)
-    edge !== nothing && add_invoke_backedge!(sv, lookupsig, edge)
+    info = InvokeCallInfo(match, const_result, lookupsig)
     if !match.fully_covers
         effects = Effects(effects; nothrow=false)
         exct = exct ⊔ TypeError
@@ -2396,7 +2350,6 @@ function abstract_call_opaque_closure(interp::AbstractInterpreter,
     end
     rt = from_interprocedural!(interp, rt, sv, arginfo, match.spec_types)
     info = OpaqueClosureCallInfo(match, const_result)
-    edge !== nothing && add_backedge!(sv, edge)
     return CallMeta(rt, exct, effects, info)
 end
 
@@ -3401,7 +3354,6 @@ function typeinf_local(interp::AbstractInterpreter, frame::InferenceState)
 
         for currpc in bbstart:bbend
             frame.currpc = currpc
-            empty_backedges!(frame, currpc)
             stmt = frame.src.code[currpc]
             # If we're at the end of the basic block ...
             if currpc == bbend
