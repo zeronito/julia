@@ -2440,7 +2440,7 @@ true
 ```
 """
 function hasmethod(@nospecialize(f), @nospecialize(t))
-    return Core._hasmethod(f, t isa Type ? t : to_tuple_type(t))
+    return Core._hasmethod(signature_type(f, t))
 end
 
 function Core.kwcall(kwargs::NamedTuple, ::typeof(hasmethod), @nospecialize(f), @nospecialize(t))
